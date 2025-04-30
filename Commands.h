@@ -1,24 +1,20 @@
 // Ver: 10-4-2025
 #ifndef SMASH_COMMAND_H_
 #define SMASH_COMMAND_H_
-
-#include <list>
 #include <vector>
+#include <list>
+#include <unordered_map>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
-
 class Command {
-    protected:
+protected:
     const char* cmd_line;
-    // TODO: Add your data members
+
 public:
     Command(const char *cmd_line);
-
-    virtual ~Command() = default;
-
     virtual void execute() = 0;
-
+    const char* getCmdLine() const;
     //virtual void prepare();
     //virtual void cleanup();
     // TODO: Add your extra methods if needed
@@ -27,18 +23,14 @@ public:
 class BuiltInCommand : public Command {
 public:
     BuiltInCommand(const char *cmd_line);
-
-    virtual ~BuiltInCommand() {
-    }
+    virtual ~BuiltInCommand() {}
 };
 
 class ExternalCommand : public Command {
     bool complex;
     bool background;
-
 public:
     ExternalCommand(const char *cmd_line);
-    virtual ~ExternalCommand() {}
     void execute() override;
 };
 
@@ -47,10 +39,7 @@ class RedirectionCommand : public Command {
     // TODO: Add your data members
 public:
     explicit RedirectionCommand(const char *cmd_line);
-
-    virtual ~RedirectionCommand() {
-    }
-
+    virtual ~RedirectionCommand() {    }
     void execute() override;
 };
 
@@ -58,30 +47,21 @@ class PipeCommand : public Command {
     // TODO: Add your data members
 public:
     PipeCommand(const char *cmd_line);
-
-    virtual ~PipeCommand() {
-    }
-
+    virtual ~PipeCommand() {}
     void execute() override;
 };
 
 class DiskUsageCommand : public Command {
 public:
     DiskUsageCommand(const char *cmd_line);
-
-    virtual ~DiskUsageCommand() {
-    }
-
+    virtual ~DiskUsageCommand() { }
     void execute() override;
 };
 
 class WhoAmICommand : public Command {
 public:
     WhoAmICommand(const char *cmd_line);
-
-    virtual ~WhoAmICommand() {
-    }
-
+    virtual ~WhoAmICommand() {    }
     void execute() override;
 };
 
@@ -89,33 +69,29 @@ class NetInfo : public Command {
     // TODO: Add your data members **BONUS: 10 Points**
 public:
     NetInfo(const char *cmd_line);
-
-    virtual ~NetInfo() {
-    }
-
+    virtual ~NetInfo() {    }
     void execute() override;
 };
 
-
 class ChangeDirCommand : public BuiltInCommand {
-    char** plastPwd;
+    char ** plastPwd;
     // TODO: Add your data members public:
+    virtual ~ChangeDirCommand();
     ChangeDirCommand(const char *cmd_line, char **plastPwd);
-    virtual ~ChangeDirCommand() {}
     void execute() override;
 };
 
 class GetCurrDirCommand : public BuiltInCommand {
 public:
+    virtual ~GetCurrDirCommand();
     GetCurrDirCommand(const char *cmd_line);
-    virtual ~GetCurrDirCommand() {}
     void execute() override;
 };
 
 class ShowPidCommand : public BuiltInCommand {
     public:
+    virtual ~ShowPidCommand(){}
     ShowPidCommand(const char *cmd_line);
-    virtual ~ShowPidCommand() {}
     void execute() override;
 };
 
@@ -123,27 +99,34 @@ class JobsList;
 
 class QuitCommand : public BuiltInCommand {
     JobsList *jobs;
+    public:
     QuitCommand(const char *cmd_line, JobsList *jobs);
-    virtual ~QuitCommand() {}
     void execute() override;
+    virtual ~QuitCommand() {}
 };
 
+class Chprompt : public BuiltInCommand {
+    // TODO: Add your data members
+public:
+    Chprompt(const char *cmd_line);
+    virtual ~Chprompt() { }
+    void execute() override;
+};
 
 class JobsList {
 public:
     class JobEntry {
-        public:
-        //long pid; // todo
         long job_id;
-        Command *cmd;
+        Command* cmd;
         bool isStopped;
-
+       pid_t pid;
     public:
-        JobEntry(long job_id, Command *cmd, bool is_stopped)
-            : job_id(job_id),
-              cmd(cmd),
-              isStopped(is_stopped) {
-        }
+        JobEntry(long job_id,Command *cmd, bool isStopped = false);
+        pid_t getPid() const;
+        long getJobId() const;
+        bool isJobStopped() const;
+        Command *getCmd() const;
+
     };
     int max_job_id;
     std::list<JobEntry> jobs;
@@ -155,7 +138,9 @@ public:
 
     void KillForQuitCommand();
 
-    int getMaxJobId();
+    int findNewMaxJobId () const; //searching max after delete
+
+    void setMaxJobId(int max_job_id);
 
     void addJob(Command *cmd, bool isStopped = false);
 
@@ -165,92 +150,83 @@ public:
 
     void removeFinishedJobs();
 
+    int get_max_job_id() const; //returns current max
+
     JobEntry *getJobById(int jobId);
 
     void removeJobById(int jobId);
 
-    JobEntry *getLastJob(int *lastJobId);
+    JobEntry *getLastJob(int lastJobId);
 
-    JobEntry *getLastStoppedJob(int *jobId);
+    JobEntry *getLastStoppedJob(int jobId);
 
-    void setMaxJobId(int jobId);
 
     // TODO: Add extra methods or modify exisitng ones as needed
 };
 
 class JobsCommand : public BuiltInCommand {
     // TODO: Add your data members
+    JobsList* jobs;
+
 public:
     JobsCommand(const char *cmd_line, JobsList *jobs);
-
-    virtual ~JobsCommand() {
-    }
-
+    virtual ~JobsCommand() {    }
     void execute() override;
 };
 
 class KillCommand : public BuiltInCommand {
-    // TODO: Add your data members
     JobsList *jobs;
 public:
     KillCommand(const char *cmd_line, JobsList *jobs);
-    virtual ~KillCommand() = default;
     void execute() override;
+    virtual ~KillCommand();
 };
 
 class ForegroundCommand : public BuiltInCommand {
-    // TODO: Add your data members
+    JobsList* jobs;
 public:
     ForegroundCommand(const char *cmd_line, JobsList *jobs);
-
-    virtual ~ForegroundCommand() {
-    }
-
+    virtual ~ForegroundCommand() {}
     void execute() override;
 };
 
 class AliasCommand : public BuiltInCommand {
 public:
     AliasCommand(const char *cmd_line);
-
-    virtual ~AliasCommand() {
-    }
-
+    virtual ~AliasCommand() { }
     void execute() override;
 };
 
 class UnAliasCommand : public BuiltInCommand {
 public:
     UnAliasCommand(const char *cmd_line);
-
-    virtual ~UnAliasCommand() {
-    }
-
+    virtual ~UnAliasCommand() { }
     void execute() override;
 };
 
 class UnSetEnvCommand : public BuiltInCommand {
 public:
     UnSetEnvCommand(const char *cmd_line);
-
-    virtual ~UnSetEnvCommand() {
-    }
-
+    virtual ~UnSetEnvCommand() {}
     void execute() override;
 };
 
 class WatchProcCommand : public BuiltInCommand {
 public:
     WatchProcCommand(const char *cmd_line);
-    virtual ~WatchProcCommand() {}
     void execute() override;
+    virtual ~WatchProcCommand() { }
 };
 
 class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
-    bool isBuiltInCommand(const char *cmd_line);
+    std::string current_dir;
+    std::string last_dir;
+    std::string chprompt;
+    JobsList jobs;
+    std::unordered_map<std::string,std::string> alias;
 
 public:
     Command *CreateCommand(const char *cmd_line);
@@ -265,10 +241,15 @@ public:
     }
 
     ~SmallShell();
-
     void executeCommand(const char *cmd_line);
-
-    // TODO: add extra methods as needed
+    void setChprompt(std::string newChprompt = "Smash");
+    std::string getChprompt() const;
+    std::string alias_preparse_Cmd(const char *cmd_line);
+    bool find_alias(std::string alias);
+    std::string get_alias(std::string alias);
+    void set_alias(std::string alias,std::string command);
+    void remove_alias(std::string alias);
+    bool isBuiltInCommand(const char *cmd_line);
 };
 
 #endif //SMASH_COMMAND_H_
