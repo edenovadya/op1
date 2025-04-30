@@ -1,0 +1,625 @@
+#include <unistd.h>
+#include <string.h>
+#include <iostream>
+#include <vector>
+#include <sstream>
+#include <sys/wait.h>
+#include <iomanip>
+#include "Commands.h"
+#include <set>
+#include <fstream>
+#include <signal.h>
+
+using namespace std;
+
+const std::string WHITESPACE = " \n\r\t\f\v";
+
+#if 0
+#define FUNC_ENTRY()  \
+  cout << __PRETTY_FUNCTION__ << " --> " << endl;
+
+#define FUNC_EXIT()  \
+  cout << __PRETTY_FUNCTION__ << " <-- " << endl;
+#else
+#define FUNC_ENTRY()
+#define FUNC_EXIT()
+#endif
+
+string _ltrim(const std::string &s) {
+    size_t start = s.find_first_not_of(WHITESPACE);
+    return (start == std::string::npos) ? "" : s.substr(start);
+}
+
+string _rtrim(const std::string &s) {
+    size_t end = s.find_last_not_of(WHITESPACE);
+    return (end == std::string::npos) ? "" : s.substr(0, end + 1);
+}
+
+string _trim(const std::string &s) {
+    return _rtrim(_ltrim(s));
+}
+
+int _parseCommandLine(const char *cmd_line, char **args) {
+    FUNC_ENTRY()
+    int i = 0;
+    std::istringstream iss(_trim(string(cmd_line)).c_str());
+    for (std::string s; iss >> s;) {
+        args[i] = (char *) malloc(s.length() + 1);
+        memset(args[i], 0, s.length() + 1);
+        strcpy(args[i], s.c_str());
+        args[++i] = NULL;
+    }
+    return i;
+
+    FUNC_EXIT()
+}
+
+bool _isBackgroundComamnd(const char *cmd_line) {
+    const string str(cmd_line);
+    return str[str.find_last_not_of(WHITESPACE)] == '&';
+}
+
+bool _isComplexComamnd(const char *cmd_line) {
+    const string str(cmd_line);
+    return (str[str.find_last_not_of(WHITESPACE)] == ('*') || str[str.find_last_not_of(WHITESPACE)] == ('?'));
+}
+
+bool _isBackgroundComamndForString(const std::string& cmd_line) {
+    const string str(cmd_line);
+    return str[str.find_last_not_of(WHITESPACE)] == '&';
+}
+
+void _removeBackgroundSign(char *cmd_line) {
+    const string str(cmd_line);
+    // find last character other than spaces
+    unsigned int idx = str.find_last_not_of(WHITESPACE);
+    // if all characters are spaces then return
+    if (idx == string::npos) {
+        return;
+    }
+    // if the command line does not end with & then return
+    if (cmd_line[idx] != '&') {
+        return;
+    }
+    // replace the & (background sign) with space and then remove all tailing spaces.
+    cmd_line[idx] = ' ';
+    // truncate the command line string up to the last non-space character
+    cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
+}
+
+void _removeBackgroundSignForString(std::string& cmd_line) {
+    const string str(cmd_line);
+    // find last character other than spaces
+    unsigned int idx = str.find_last_not_of(WHITESPACE);
+    // if all characters are spaces then return
+    if (idx == string::npos) {
+        return;
+    }
+    // if the command line does not end with & then return
+    if (cmd_line[idx] != '&') {
+        return;
+    }
+    // replace the & (background sign) with space and then remove all tailing spaces.
+    cmd_line[idx] = ' ';
+    // truncate the command line string up to the last non-space character
+    cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
+}
+
+bool isNumber(const std::string &s) {
+    if (s.empty()) {
+        return false;
+    }
+    for (int i = 0; i < s.length(); i++) {
+        if (!isdigit(s[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isNumberWithDash(const std::string &s) {
+    if (s.empty()) {
+        return false;
+    }
+    for (int i = 1; i < s.length(); i++) {
+        if (!isdigit(s[i]) && s[0] == '-') {
+            return false;
+        }
+    }
+    return true;
+}
+
+// TODO: Add your implementation for classes in Commands.h 
+Command::Command(const char *cmd_line) {
+    this->cmd_line = cmd_line;
+}
+
+
+SmallShell::SmallShell() {
+// TODO: add your implementation
+}
+
+SmallShell::~SmallShell() {
+// TODO: add your implementation
+}
+
+/**
+* Creates and returns a pointer to Command class which matches the given command line (cmd_line)
+*/
+Command *SmallShell::CreateCommand(const char *cmd_line) {
+    // For example:
+  /*
+  string cmd_s = _trim(string(cmd_line));
+  string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+
+  if (firstWord.compare("pwd") == 0) {
+    return new GetCurrDirCommand(cmd_line);
+  }
+  else if (firstWord.compare("showpid") == 0) {
+    return new ShowPidCommand(cmd_line);
+  }
+  else if ...
+  .....
+  else {
+    return new ExternalCommand(cmd_line);
+  }
+  */
+    return nullptr;
+}
+
+void SmallShell::executeCommand(const char *cmd_line) {
+    // TODO: Add your implementation here
+    // for example:
+    // Command* cmd = CreateCommand(cmd_line);
+    // cmd->execute();
+    // Please note that you must fork smash process for some commands (e.g., external commands....)
+}
+
+//todo: showpid command
+ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+void ShowPidCommand::execute() override {
+    std::cout << "smash pid is " << getpid() << std::endl;
+}
+
+//todo: GetCurrDirCommand
+GetCurrDirCommand::GetCurrDirCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+void GetCurrDirCommand::execute() override {
+    char* cwd = new char[COMMAND_MAX_LENGTH];
+    if(getcwd(cwd, COMMAND_MAX_LENGTH) == nullptr){
+        std::perror("smash error:getcwd failed\n");
+        delete[] cwd;
+        return;
+    }
+    std::cout << cwd << std::endl;
+    delete[] cwd;
+}
+
+//todo:ChangeDirCommand
+ChangeDirCommand::ChangeDirCommand(const char *cmd_line, char **plastPwd) : BuiltInCommand(cmd_line) , plastPwd(plastPwd) {}
+void ChangeDirCommand::execute() {
+    std::string cmd_string = string(cmd_line);
+    if (_isBackgroundComamndForString(cmd_string)) {
+        _removeBackgroundSignForString(cmd_string);
+    }
+    cmd_string = _trim(cmd_string);
+
+    char* args[COMMAND_MAX_ARGS];
+    int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+    //if there are more than 2 args
+    if (num_of_args > 2) {
+        std::cerr << "smash error: cd: too many arguments" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+    //if there is 1 arg (only cd)
+    if (num_of_args == 1) {
+        char* going_to_be_last_dir = new char[COMMAND_MAX_LENGTH];
+        if(getcwd(going_to_be_last_dir, COMMAND_MAX_LENGTH) == nullptr){
+            perror("smash error: getcwd failed");
+            delete[] going_to_be_last_dir;
+            for(int i = 0; i < num_of_args; i++){
+                free(args[i]);
+            }
+            return;
+        }
+        delete[] *plastPwd;
+        *plastPwd = strdup(going_to_be_last_dir);
+        for(int i = 0; i < num_of_args; i++){
+            free(args[i]);
+        }
+        return;
+    }
+
+    //there are exactly 2 args
+    if (strcmp(args[1], "-") == 0) {
+        if (*plastPwd == nullptr || (*plastPwd)[0] == '\0') { //if there isnt last pwd
+            std::cerr << "smash error: cd: OLDPWD not set" << std::endl;
+            for (int i = 0; i < num_of_args; i++) {
+                free(args[i]);
+            }
+            return;
+        }
+
+        char curr_dir[COMMAND_MAX_LENGTH];
+        if (getcwd(curr_dir, sizeof(curr_dir)) == nullptr) {
+            perror("smash error: getcwd failed");
+            for (int i = 0; i < num_of_args; i++) {
+                free(args[i]);
+            }
+            return;
+        }
+
+        if (chdir(*plastPwd) == -1) {
+            perror("smash error: chdir failed");
+            for (int i = 0; i < num_of_args; i++) {
+                free(args[i]);
+            }
+            return;
+        }
+
+        delete[] *plastPwd;
+        *plastPwd = strdup(curr_dir); // מעתיקים את ה-current לתוך lastPwd
+    }
+    else { //reglar cd
+        char curr_dir[COMMAND_MAX_LENGTH];
+        if (getcwd(curr_dir, sizeof(curr_dir)) == nullptr) {
+            perror("smash error: getcwd failed");
+            for (int i = 0; i < num_of_args; i++) {
+                free(args[i]);
+            }
+            return;
+        }
+
+        if (chdir(args[1]) == -1) {
+            perror("smash error: chdir failed");
+            for (int i = 0; i < num_of_args; i++) {
+                free(args[i]);
+            }
+            return;
+        }
+
+        delete[] *plastPwd;
+        *plastPwd = strdup(curr_dir); // מעדכנים את ה-last directory
+    }
+
+    for (int i = 0; i < num_of_args; i++) {
+        free(args[i]);
+    }
+}
+
+//todo:Quit Command
+QuitCommand::QuitCommand(const char *cmd_line, JobsList *jobs):BuiltInCommand(cmd_line) , jobs(jobs) {}
+void QuitCommand::execute() override {
+    std::string cmd_string = string(cmd_line);
+    if (_isBackgroundComamndForString(cmd_string)) {
+        _removeBackgroundSignForString(cmd_string);
+    }
+    cmd_string = _trim(cmd_string);
+    char* args[COMMAND_MAX_ARGS];
+    int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+    if (num_of_args >= 2 && strcmp(args[1], "kill") == 0) {
+        jobs->KillForQuitCommand();
+        for(int i=0; i<num_of_args; i++){
+            free(args[i]);
+        }
+        exit(0);
+    }
+    if (num_of_args >= 1) {
+        for(int i=0; i<num_of_args; i++){
+            free(args[i]);
+        }
+        exit(0);
+    }
+}
+
+void JobsList::KillForQuitCommand() {
+    this->removeFinishedJobs();
+    std::cout << "smash: sending SIGKILL signal to " << jobs.size() << " jobs:" << std::endl;
+    for (int i = 0; i<jobs.size(); i++) {
+        std::cout << jobs[i].getPid() << ": " << jobs[i].getCmd().getCmd() << std::endl;
+        if (kill(jobs[i].getPid(), SIGKILL) == -1) {
+            perror("smash error: kill failed");
+        }
+    }
+    if (jobs.size() == 0) {
+        max_job_id = 0;
+    }
+    else {
+        max_job_id = getMaxJobId();
+    }
+}
+
+int JobsList::getMaxJobId() {
+    int max = 0;
+    for (int i = 0; i < jobs.size(); i++) {
+        if (max<jobs[i].getPid()) {
+            max = jobs[i].getPid();
+        }
+    }
+    return max;
+}
+
+//todo: KillCommand
+KillCommand::KillCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) , jobs(jobs) {}
+void KillCommand::execute() override {
+    std::string cmd_string = string(cmd_line);
+    if (_isBackgroundComamndForString(cmd_string)) {
+        _removeBackgroundSignForString(cmd_string);
+    }
+    cmd_string = _trim(cmd_string);
+    char* args[COMMAND_MAX_ARGS];
+    int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+
+    if (num_of_args != 3) {
+        std::cout << "smash error: kill: invalid arguments" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    if (!isNumber(args[2]) || !isNumberWithDash(args[1])) {
+        std::cout << "smash error: kill: invalid arguments" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    //checkinf for valid numbers
+    int job_id = stoi(args[2]);
+    int signal_number = stoi(args[1]);
+    signal_number = abs(signal_number);
+
+    if (signal_number> 31 || signal_number < 1 || job_id < 0) {
+        std::cout << "smash error: kill: invalid arguments" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    //check if job id exists
+    JobEntry* job = jobs->getJobById(job_id);
+    if (job == NULL) {
+        std::cout << "smash error: kill: job-id " << job_id << " does not exist" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    cout << "signal number " << signal_number << " was sent to pid " << job->getPid() << endl;
+    if (kill(job->getPid(), signal_number) == -1) {
+        perror("smash error: kill failed");
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    if (signal_number == SIGKILL) {
+        jobs->removeJobById(job_id);
+        jobs->setMaxJobId(jobs->getMaxJobId());
+    }
+
+    for (int i = 0; i < num_of_args; i++) {
+        free(args[i]);
+    }
+    return;
+}
+
+//todo: UnSetEnvCommand
+UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+void UnSetEnvCommand::execute() override {
+    std::string cmd_string = string(cmd_line);
+    if (_isBackgroundComamndForString(cmd_string)) {
+        _removeBackgroundSignForString(cmd_string);
+    }
+    cmd_string = _trim(cmd_string);
+    char* args[COMMAND_MAX_ARGS];
+    int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+    if (num_of_args == 1) {
+        std::cout << "smash error: unsetenv: not enough arguments" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+    for (int i = 0; i < num_of_args; i++) {
+        const char* var_name = args[i];
+        if (getenv(var_name) == nullptr) {
+            std::cerr << "smash error: unsetenv: " << var_name << " does not exist" << std::endl;
+            for (int j = 0; j < num_of_args; j++) {
+                free(args[j]);
+            }
+            return;
+        }
+        if (unsetenv(var_name) != 0) {
+            perror("smash error: unsetenv failed");
+            for (int j = 0; j < num_of_args; j++) {
+                free(args[j]);
+            }
+            return;
+        }
+    }
+}
+
+//todo:WatchProcCommand
+WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+void WatchProcCommand::execute() override {
+    std::string cmd_string = string(cmd_line);
+    if (_isBackgroundComamndForString(cmd_string)) {
+        _removeBackgroundSignForString(cmd_string);
+    }
+    cmd_string = _trim(cmd_string);
+    char* args[COMMAND_MAX_ARGS];
+    int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+
+    // if not 2 args
+    if (num_of_args != 2) {
+        std::cout << "smash error: watchproc: invalid arguments" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    // second arg needs to be a number
+    if (!isNumber(args[1])) {
+        std::cout << "smash error: watchproc: invalid arguments" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    //check if process exists
+    pid_t pid = stoi(args[1]);
+    if (kill(pid, 0) == -1 && errno == ESRCH) {
+        std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    //  /proc/<pid>/stat
+    std::string stat_path = "/proc/" + std::to_string(pid) + "/stat";
+    int stat_fd = open(stat_path.c_str(), O_RDONLY);
+    if (stat_fd == -1) {
+        std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    char stat_buffer[4096];
+    ssize_t stat_bytes = read(stat_fd, stat_buffer, sizeof(stat_buffer) - 1);
+    if (stat_bytes < 0) {
+        std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
+        close(stat_fd);
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+    stat_buffer[stat_bytes] = '\0';
+    close(stat_fd);
+
+    std::istringstream iss(stat_buffer);
+    std::vector<std::string> stats(std::istream_iterator<std::string>{iss}, {});
+
+    if (stats.size() < 24) {
+        std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    long utime = std::stol(stats[13]);
+    long stime = std::stol(stats[14]);
+    long total_time = utime + stime;
+
+    long clk_ticks_per_sec = sysconf(_SC_CLK_TCK);
+    double cpu_usage = (double)(total_time) / clk_ticks_per_sec * 100.0;
+
+    //  /proc/<pid>/status
+    std::string status_path = "/proc/" + std::to_string(pid) + "/status";
+    int status_fd = open(status_path.c_str(), O_RDONLY);
+    if (status_fd == -1) {
+        std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+
+    char status_buffer[4096];
+    ssize_t status_bytes = read(status_fd, status_buffer, sizeof(status_buffer) - 1);
+    if (status_bytes < 0) {
+        std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
+        close(status_fd);
+        for (int i = 0; i < num_of_args; i++) {
+            free(args[i]);
+        }
+        return;
+    }
+    status_buffer[status_bytes] = '\0';
+    close(status_fd);
+
+    std::istringstream status_iss(status_buffer);
+    std::string line;
+    double memory_mb = 0.0;
+    while (getline(status_iss, line)) {
+        if (line.find("VmRSS:") == 0) {
+            std::istringstream mem_iss(line);
+            std::string key;
+            long mem_kb;
+            mem_iss >> key >> mem_kb;
+            memory_mb = mem_kb / 1024.0;
+            break;
+        }
+    }
+
+    std::cout << "PID: " << pid
+              << " | CPU Usage: " << std::fixed << std::setprecision(1) << cpu_usage << "%"
+              << " | Memory Usage: " << std::fixed << std::setprecision(1) << memory_mb << " MB"
+              << std::endl;
+
+    for (int i = 0; i < num_of_args; i++) {
+        free(args[i]);
+    }
+
+    return;
+}
+
+ExternalCommand::ExternalCommand(const char *cmd_line): Command(cmd_line){}
+void ExternalCommand:: execute() override {
+    std::string cmd_string = string(cmd_line);
+    cmd_string = _trim(cmd_string);
+    _removeBackgroundSignForString(cmd_string);
+    background = _isBackgroundComamnd(cmd_line);
+    complex = _isComplexComamnd(cmd_line);
+
+    char* args[COMMAND_MAX_ARGS];
+    int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+
+
+
+
+
+
+
+}
+
+bool SmallShell::isBuiltInCommand(const char *cmd_line) {
+    string cmd_to_check = _trim(string(cmd_line));
+    string firstWord = cmd_to_check.substr(0, cmd_to_check.find_first_of(" \n"));
+    set<char*> built_in_commands = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg", "quit",
+        "kill", "alias", "unalias", "unsetenv", "watchproc"};
+    return std::find(built_in_commands.begin(), built_in_commands.end(), cmd_to_check) != built_in_commands.end();
+
+}
+
+
+
+//todo: Job
+void JobsList:: addJob(Command *cmd, bool isStopped) {
+    jobs.push_back(JobEntry(++max_job_id, cmd, isStopped));
+}
+
+void JobsList::printJobsList() {
+    for (const JobEntry &job : jobs) {
+        std::cout << "Job ID: " << job.job_id << ", is stopped: " << (job.isStopped ? "true" : "false") << std::endl;
+
+    }
+}
+
+void JobsList::setMaxJobId(int max) {
+    max_job_id = max;
+}

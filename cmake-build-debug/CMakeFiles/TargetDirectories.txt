@@ -1,0 +1,3 @@
+/Users/mayadeshe/Downloads/skeleton_smash_maya/cmake-build-debug/CMakeFiles/skeleton_smash.dir
+/Users/mayadeshe/Downloads/skeleton_smash_maya/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/mayadeshe/Downloads/skeleton_smash_maya/cmake-build-debug/CMakeFiles/rebuild_cache.dir
