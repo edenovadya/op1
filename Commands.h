@@ -89,6 +89,7 @@ public:
 };
 
 class ChangeDirCommand : public BuiltInCommand {
+    public:
     std::string* plastPwd;
     // TODO: Add your data members public:
     ~ChangeDirCommand() override = default;

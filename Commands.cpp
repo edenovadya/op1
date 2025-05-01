@@ -67,13 +67,13 @@ string _trim(const std::string &s) {
 string symbols_cleanup(const std::string &s) {
     string output = s;
     if(output.find('|') != std::string::npos){
-        output.substr(0,output.find('|'));
+        output = output.substr(0,output.find('|'));
     }
     if(output.find('>') != std::string::npos){
-        output.substr(0,output.find('>'));
+        output = output.substr(0,output.find('>'));
     }
     if(output.find('&') != std::string::npos){
-        output.substr(0,output.find('&'));
+        output = output.substr(0,output.find('&'));
     }
     return output;
 }
@@ -246,7 +246,7 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
         return new GetCurrDirCommand(cmd_line);
 
     }else if(firstWord.compare("cd") == 0){
-        return new ChangeDirCommand(cmd_line,&last_dir);
+        return new ChangeDirCommand(cmd_line, &last_dir);
 
     }else if(firstWord.compare("jobs") == 0){
         return new JobsCommand(cmd_line,&jobs);
@@ -732,6 +732,8 @@ void UnSetEnvCommand::execute()  {
 }
 
 //todo:WatchProcCommand
+WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+
 void WatchProcCommand::execute()  {
     std::string cmd_string = string(cmd_line);
     if (_isBackgroundComamndForString(cmd_string)) {
