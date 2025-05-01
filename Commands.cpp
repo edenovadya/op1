@@ -44,12 +44,27 @@ string _rtrim(const std::string &s) {
 string _trim(const std::string &s) {
     return _rtrim(_ltrim(s));
 }
+string symbols_cleanup(const std::string &s) {
+    string output = s;
+    if(output.find('|') != std::string::npos){
+        output.substr(0,output.find('|'));
+    }
+    if(output.find('>') != std::string::npos){
+        output.substr(0,output.find('>'));
+    }
+    if(output.find('&') != std::string::npos){
+        output.substr(0,output.find('&'));
+    }
+    return output;
+}
 
 std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) {
     string trimmed = _trim(string(cmd_line));
     istringstream iss(trimmed);
     string firstWord;
     iss >> firstWord;
+
+    firstWord = symbols_cleanup(firstWord);
 
     string restOfLine;
     getline(iss, restOfLine);
@@ -174,6 +189,7 @@ SmallShell::SmallShell():chprompt("smash"), last_dir(""), current_pid_fg(-1) {
 Command *SmallShell::CommandByFirstWord(const char *cmd_line){
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+    firstWord = symbols_cleanup(firstWord);
 
     if (firstWord.compare("chprompt") == 0) {
         return new Chprompt(cmd_line);
@@ -601,7 +617,7 @@ std::string SmallShell::get_alias(std::string alias) {
     }
 }
 void SmallShell::set_alias(std::string alias,std::string command) {
-    this->alias[alias] =  command;
+    this->alias[alias] = command;
 }
 
 //todo: unalias command
