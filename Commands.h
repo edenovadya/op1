@@ -257,8 +257,8 @@ public:
     }
 
     ~SmallShell()= default;
-    pid_t get_currentt_pid_fg() const ;
-    void set_currentt_pid_fg(pid_t pid);
+    pid_t get_current_pid_fg() const ;
+    void set_current_pid_fg(pid_t pid);
     JobsList getJobs() const;
     void executeCommand(const char *cmd_line);
     void setChprompt(std::string newChprompt = "Smash");
@@ -269,6 +269,7 @@ public:
     void set_alias(std::string alias,std::string command);
     void remove_alias(std::string alias);
     bool isBuiltInCommand(const char *cmd_line);
+    Command* CommandByFirstWord(const char *cmd_line);
 };
 
 #endif //SMASH_COMMAND_H_

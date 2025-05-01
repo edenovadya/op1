@@ -474,12 +474,12 @@ void ForegroundCommand::execute() {
             }
         }else{
             pid_t pid = job->getPid();
-            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            SmallShell::getInstance().set_current_pid_fg(pid);
             if(waitpid(pid,nullptr,0) == -1) {
                 perror("smash error: waitpid failed");
                 return;
             }
-            SmallShell::getInstance().set_currentt_pid_fg(-1);
+            SmallShell::getInstance().set_current_pid_fg(-1);
             jobs->removeJobById(job->getJobId());
         }
     }
@@ -919,12 +919,12 @@ void ExternalCommand:: execute()  {
             perror("smash error: execvp failed");
             exit(1);
         } else {
-            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            SmallShell::getInstance().set_current_pid_fg(pid);
             if(waitpid(pid, nullptr, WUNTRACED)==-1) {
                 perror("smash error: waitpid failed");
                 return;
             }
-            SmallShell::getInstance().set_currentt_pid_fg(-1);
+            SmallShell::getInstance().set_current_pid_fg(-1);
 
         }
     }
@@ -940,12 +940,12 @@ void ExternalCommand:: execute()  {
             perror("smash error: execv failed");
             exit(1);
         } else {
-            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            SmallShell::getInstance().set_current_pid_fg(pid);
             if(waitpid(pid, nullptr, WUNTRACED==-1)) {
                 perror("smash error: waitpid failed");
                 return;
             }
-            SmallShell::getInstance().set_currentt_pid_fg(-1);
+            SmallShell::getInstance().set_current_pid_fg(-1);
 
         }
     }
@@ -1085,12 +1085,12 @@ JobsList::JobsList(): max_job_id(0) {}
 JobsList::JobEntry::JobEntry(long job_id, Command *cmd, bool isStopped):
 job_id(job_id),cmd(cmd),isStopped(isStopped) {}
 
-pid_t SmallShell::get_currentt_pid_fg() const {
-    return currentt_pid_fg;
+pid_t SmallShell::get_current_pid_fg() const {
+    return current_pid_fg;
 }
 
-void SmallShell::set_currentt_pid_fg(pid_t pid) {
-    this->currentt_pid_fg = pid;
+void SmallShell::set_current_pid_fg(pid_t pid) {
+    this->current_pid_fg = pid;
 }
 
 //todo: du command
@@ -1139,12 +1139,12 @@ void DiskUsageCommand::execute() {
         if (background) {
             SmallShell::getInstance().getJobs().addJob(this, pid);
         } else {
-            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            SmallShell::getInstance().set_current_pid_fg(pid);
             if (waitpid(pid, nullptr, WUNTRACED) == -1) {
                 perror("smash error: waitpid failed");
                 return;
             }
-            SmallShell::getInstance().set_currentt_pid_fg(-1);
+            SmallShell::getInstance().set_current_pid_fg(-1);
         }
     }
 }
@@ -1238,12 +1238,12 @@ void NetInfo::execute() {
         if (background) {
             SmallShell::getInstance().getJobs().addJob(this, pid);
         } else {
-            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            SmallShell::getInstance().set_current_pid_fg(pid);
             if (waitpid(pid, nullptr, WUNTRACED) == -1) {
                 perror("smash error: waitpid failed");
                 return;
             }
-            SmallShell::getInstance().set_currentt_pid_fg(-1);
+            SmallShell::getInstance().set_current_pid_fg(-1);
         }
     }
 }
@@ -1507,8 +1507,8 @@ void PipeCommand::execute() {
         exit(1);
     }
 
-    SmallShell::getInstance().set_currentt_pid_fg(pid1);
-    SmallShell::getInstance().set_currentt_pid_fg(pid2);
+    SmallShell::getInstance().set_current_pid_fg(pid1);
+    SmallShell::getInstance().set_current_pid_fg(pid2);
 
     if (close(fd[0]) == -1) {
         perror("smash error: close failed");
@@ -1528,7 +1528,7 @@ void PipeCommand::execute() {
         return;
     }
 
-    SmallShell::getInstance().set_currentt_pid_fg(-1);
+    SmallShell::getInstance().set_current_pid_fg(-1);
 }
 
 
