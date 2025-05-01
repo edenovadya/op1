@@ -6,5 +6,15 @@
 using namespace std;
 
 void ctrlCHandler(int sig_num) {
+    std::cout<<"smash: got ctrl-C"<<endl;
+    pid_t fgPid = SmallShell::getInstance().get_currentt_pid_fg();
+    if (fgPid != pid_t(-1)) {
+        if(kill(fgPid, SIGKILL) == -1) {
+            perror("smash error: kill failed");
+            return;
+        }
+        std::cout<<"smash: process " << fgPid << " was killed" << std::endl;
+        SmallShell::getInstance().set_currentt_pid_fg(-1);
+    }
     // TODO: Add your implementation
 }

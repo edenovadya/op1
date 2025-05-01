@@ -52,10 +52,14 @@ public:
 };
 
 class DiskUsageCommand : public Command {
+private:
+size_t getDirectorySize(const std::string& path);
 public:
     DiskUsageCommand(const char *cmd_line);
     virtual ~DiskUsageCommand() { }
     void execute() override;
+    size_t runDuInternal(const std::string &cmd);
+
 };
 
 class WhoAmICommand : public Command {
@@ -71,6 +75,12 @@ public:
     NetInfo(const char *cmd_line);
     virtual ~NetInfo() {    }
     void execute() override;
+
+    void runNetInfoInternal(const std::string &iface);
+
+    std::string getDefaultGateway();
+
+    void printDNSServers();
 };
 
 class ChangeDirCommand : public BuiltInCommand {
@@ -226,6 +236,7 @@ private:
     std::string last_dir;
     std::string chprompt;
     JobsList jobs;
+    pid_t currentt_pid_fg;
     std::unordered_map<std::string,std::string> alias;
 
 public:
@@ -241,6 +252,9 @@ public:
     }
 
     ~SmallShell();
+    pid_t get_currentt_pid_fg() const ;
+    void set_currentt_pid_fg(pid_t pid);
+    JobsList getJobs() const;
     void executeCommand(const char *cmd_line);
     void setChprompt(std::string newChprompt = "Smash");
     std::string getChprompt() const;
