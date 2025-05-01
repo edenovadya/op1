@@ -36,17 +36,22 @@ public:
 
 
 class RedirectionCommand : public Command {
-    // TODO: Add your data members
+    bool isOverride;
+    Command* command;
+    std::string file;
 public:
-    explicit RedirectionCommand(const char *cmd_line);
-    virtual ~RedirectionCommand() {    }
+    explicit RedirectionCommand(const char *cmd_line,Command *command);
+    virtual ~RedirectionCommand() {}
     void execute() override;
 };
 
 class PipeCommand : public Command {
-    // TODO: Add your data members
+    bool containsCerrPipe;
+    Command* firstCommand;
+    Command* secondCommand;
 public:
-    PipeCommand(const char *cmd_line);
+    PipeCommand(const char *cmd_line, Command* firstCommand,
+                Command* secondCommand,bool isContainsCerrPipe);
     virtual ~PipeCommand() {}
     void execute() override;
 };

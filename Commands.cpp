@@ -18,14 +18,12 @@
 #include <iterator>
 #include <Regex>
 #include <signal.h>
-#include <netinet/in.h>
-#include <net/if.h>
 #include <sys/ioctl.h>
-#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <linux/route.h>
 #include <fcntl.h>
 #include <string>
+#include <pwd.h>
 
 using namespace std;
 
@@ -191,6 +189,12 @@ bool isNumberWithDash(const std::string &s) {
     return true;
 }
 
+bool containsArrow(const std::string &s);
+bool containsTwoArrow(const std::string &s);
+bool containsCerrPipe(const std::string &s); //todo
+
+
+
 // TODO: Add your implementation for classes in Commands.h
 Command::Command(const char *cmd_line) {
     this->cmd_line = cmd_line;
@@ -263,13 +267,13 @@ void Chprompt::execute() {
 
 //todo: showpid command
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
-void ShowPidCommand::execute() override {
+void ShowPidCommand::execute()  {
     std::cout << "smash pid is " << getpid() << std::endl;
 }
 
 //todo: GetCurrDirCommand
 GetCurrDirCommand::GetCurrDirCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
-void GetCurrDirCommand::execute() override {
+void GetCurrDirCommand::execute()  {
     char* cwd = new char[COMMAND_MAX_LENGTH];
     if(getcwd(cwd, COMMAND_MAX_LENGTH) == nullptr){
         std::perror("smash error:getcwd failed\n");
@@ -412,7 +416,7 @@ void ForegroundCommand::execute() {
 
 //todo:Quit Command
 QuitCommand::QuitCommand(const char *cmd_line, JobsList *jobs):BuiltInCommand(cmd_line) , jobs(jobs) {}
-void QuitCommand::execute() override {
+void QuitCommand::execute()  {
     std::string cmd_string = string(cmd_line);
     if (_isBackgroundComamndForString(cmd_string)) {
         _removeBackgroundSignForString(cmd_string);
@@ -464,7 +468,7 @@ int JobsList::findNewMaxJobId() const {
 
 //todo: KillCommand
 KillCommand::KillCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) , jobs(jobs) {}
-void KillCommand::execute() override {
+void KillCommand::execute()  {
     std::string cmd_string = string(cmd_line);
     if (_isBackgroundComamndForString(cmd_string)) {
         _removeBackgroundSignForString(cmd_string);
@@ -618,7 +622,7 @@ void SmallShell::remove_alias(std::string alias) {
 
 //todo: UnSetEnvCommand
 UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
-void UnSetEnvCommand::execute() override {
+void UnSetEnvCommand::execute()  {
     std::string cmd_string = string(cmd_line);
     if (_isBackgroundComamndForString(cmd_string)) {
         _removeBackgroundSignForString(cmd_string);
@@ -654,7 +658,7 @@ void UnSetEnvCommand::execute() override {
 
 //todo:WatchProcCommand
 WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
-void WatchProcCommand::execute() override {
+void WatchProcCommand::execute()  {
     std::string cmd_string = string(cmd_line);
     if (_isBackgroundComamndForString(cmd_string)) {
         _removeBackgroundSignForString(cmd_string);
@@ -788,9 +792,8 @@ JobsList SmallShell::getJobs() const {
     return jobs;
 }
 
-ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {}
-
-void ExternalCommand::execute() override {
+ExternalCommand::ExternalCommand(const char *cmd_line): Command(cmd_line){}
+void ExternalCommand:: execute()  {
     std::string cmd_string = string(cmd_line);
     cmd_string = _trim(cmd_string);
     _removeBackgroundSignForString(cmd_string);
@@ -1081,7 +1084,6 @@ size_t DiskUsageCommand::getDirectorySize(const std::string& path) {
     return totalSize;
 }
 
-
 //todo: netinfo command
 NetInfo::NetInfo(const char *cmd_line) : Command(cmd_line) {}
 void NetInfo::execute() override {
@@ -1225,4 +1227,81 @@ void NetInfo::printDNSServers() {
     }
 }
 
+//todo: RedirectionCommand
+RedirectionCommand::RedirectionCommand(const char *cmd_line, Command *command) : Command(cmd_line), command(command) {
+    isOverride = !containsTwoArrow(cmd_line);
+    istringstream iss(cmd_line);
+    for (std::string s; iss >> s;){
+        if(s == ">>" || s == ">")
+            iss >> file;
+        break;
+    }
+}
 
+
+void RedirectionCommand::execute() {// todo
+    int saved_stdout = dup(1);
+    close(1);
+    int fd = open(file,  O_CREAT | O_WRONLY | (isOverride ? O_TRUNC : O_APPEND) , 0644);
+    dup2(fd, 1);
+    close(fd);
+    command->execute();
+    dup2(saved_stdout, 1);
+    close(saved_stdout);
+}
+
+//todo: PipeCommand
+PipeCommand::PipeCommand(const char *cmd_line, Command* firstCommand,
+                         Command* secondCommand, bool isContainsCerrPipe) :
+                         Command(cmd_line), firstCommand(firstCommand),
+                         secondCommand(secondCommand), containsCerrPipe
+                         (isContainsCerrPipe){}
+
+void PipeCommand::execute() {
+    int fd[2];
+    pipe(fd);
+    pid_t pid1 = fork();
+    if(pid1 < 0){
+        perror("smash error: fork failed");
+    }else if(pid1 == 0){
+        setpgrp();
+        close(fd[0]);
+        dup2(fd[1],1);
+        close(fd[1]);
+        firstCommand->execute();
+        waitpid(pid,nullptr,0);
+        exit(1);
+    }
+    pid_t pid2 = fork();
+    if(pid2 < 0){
+        perror("smash error: fork failed");
+    }else if(pid2 == 0){
+        setpgrp();
+        close(fd[1]);
+        dup2(fd[0],0);
+        close(fd[0]);
+        secondCommand->execute();
+        exit(1);
+    }
+    SmallShell::getInstance().set_currentt_pid_fg(pid1);
+    SmallShell::getInstance().set_currentt_pid_fg(pid2);
+    close(fd[0]);
+    close(fd[1]);
+    waitpid(pid1, nullptr, 0);
+    waitpid(pid2, nullptr, 0);
+    SmallShell::getInstance().set_currentt_pid_fg(-1);
+
+}
+
+//todo: whoamicommand
+WhoAmICommand::WhoAmICommand(const char *cmd_line) : Command(cmd_line) {}
+
+void WhoAmICommand::execute() {
+    uid_t uid = getuid();
+    struct passwd* pw = getpwuid(uid);
+    if (pw == nullptr) {
+        perror("smash error: getpwuid failed");
+        return;
+    }
+    std::cout << pw->pw_name << " " << pw->pw_dir << std::endl;
+}
