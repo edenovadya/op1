@@ -1,5 +1,5 @@
 #include <unistd.h>
-#include <string.h>
+#include <cstring>
 #include <iostream>
 #include <vector>
 #include <sstream>
@@ -9,8 +9,8 @@
 #include <set>
 #include <fstream>
 #include <iterator>
-#include <Regex>
-#include <signal.h>
+#include <regex>
+#include <csignal>
 #include <pwd.h>
 #include <unistd.h>
 
@@ -154,56 +154,100 @@ bool isNumberWithDash(const std::string &s) {
     return true;
 }
 
-bool containsArrow(const std::string &s);
-bool containsTwoArrow(const std::string &s);
-bool containsCerrPipe(const std::string &s);
 
-
-
-// TODO: Add your implementation for classes in Commands.h
-Command::Command(const char *cmd_line) {
-    this->cmd_line = cmd_line;
+bool contains(const std::string &s1,const std::string &s2){
+    return s1.find(s2) != std::string::npos;
 }
 
 
-SmallShell::SmallShell() {
-// TODO: add your implementation
+Command::Command(const char *cmd_line):cmd_line(cmd_line) {}
+
+
+SmallShell::SmallShell():chprompt("smash"), last_dir(""), current_pid_fg(-1) {
+    char cwd[COMMAND_MAX_LENGTH];
+    if (getcwd(cwd, COMMAND_MAX_LENGTH) == nullptr) {
+        std::perror("smash error:getcwd failed\n");
+    }
+    current_dir = string(cwd);
 }
 
-SmallShell::~SmallShell() {
-// TODO: add your implementation
+Command *SmallShell::CommandByFirstWord(const char *cmd_line){
+    string cmd_s = _trim(string(cmd_line));
+    string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+
+    if (firstWord.compare("chprompt") == 0) {
+        return new Chprompt(cmd_line);
+
+    }else if (firstWord.compare("showpid") == 0) {
+        return new ShowPidCommand(cmd_line);
+
+    }else if (firstWord.compare("pwd") == 0) {
+        return new GetCurrDirCommand(cmd_line);
+
+    }else if(firstWord.compare("cd") == 0){
+        return new ChangeDirCommand(cmd_line,&last_dir);
+
+    }else if(firstWord.compare("jobs") == 0){
+        return new JobsCommand(cmd_line,&jobs);
+
+    }else if(firstWord.compare("fg") == 0){
+        return new ForegroundCommand(cmd_line,&jobs);
+
+    }else if(firstWord.compare("quit") == 0){
+        return new QuitCommand(cmd_line,&jobs);
+
+    }else if(firstWord.compare("kill") == 0){
+        return new KillCommand(cmd_line,&jobs);
+
+    }else if(firstWord.compare("alias") == 0){
+        return new AliasCommand(cmd_line);
+
+    }else if(firstWord.compare("unalias") == 0){
+        return new UnAliasCommand(cmd_line);
+
+    }else if(firstWord.compare("unsetenv") == 0){
+        return new UnSetEnvCommand(cmd_line);
+
+    }else if(firstWord.compare("watchproc") == 0){
+        return new WatchProcCommand(cmd_line);
+
+    }else if(firstWord.compare("du") == 0){
+        return new DiskUsageCommand(cmd_line);
+
+    }else if(firstWord.compare("whoami") == 0){
+        return new WhoAmICommand(cmd_line);
+
+    }else {
+        return new ExternalCommand(cmd_line);
+    }
 }
 
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
-    // For example:
-  /*
-  string cmd_s = _trim(string(cmd_line));
-  string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+    string cmd_s = _trim(string(alias_preparse_Cmd(cmd_line)));
+    if(contains(cmd_s,">") && (cmd_s.rfind(">") == cmd_s.find(">") || cmd_s
+    .rfind(">") - cmd_s.find(">") == 1)){
+        return new RedirectionCommand(cmd_s.c_str(),CommandByFirstWord(cmd_s.c_str()));
+    }else if(contains(cmd_s,"|")){
+        int pos = cmd_s.find("|");
+        string first_command = _trim(cmd_s.substr(0,pos));
+        string second_command = _trim(cmd_s.substr(pos+1));
 
-  if (firstWord.compare("pwd") == 0) {
-    return new GetCurrDirCommand(cmd_line);
-  }
-  else if (firstWord.compare("showpid") == 0) {
-    return new ShowPidCommand(cmd_line);
-  }
-  else if ...
-  .....
-  else {
-    return new ExternalCommand(cmd_line);
-  }
-  */
-    return nullptr;
+        return new PipeCommand(cmd_line,CommandByFirstWord(first_command
+        .c_str()),CommandByFirstWord(second_command.c_str()), contains(cmd_s,
+                                                                       "|&"));
+
+    }else{
+        return CommandByFirstWord(cmd_s.c_str());
+    }
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
-    // TODO: Add your implementation here
-    // for example:
-    // Command* cmd = CreateCommand(cmd_line);
-    // cmd->execute();
-    // Please note that you must fork smash process for some commands (e.g., external commands....)
+     Command* cmd = CreateCommand(cmd_line);
+     cmd->execute();
+     delete cmd;
 }
 
 BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
@@ -373,7 +417,9 @@ void ForegroundCommand::execute() {
             }
         }else{
             pid_t pid = job->getPid();
+            SmallShell::getInstance().set_currentt_pid_fg(pid);
             waitpid(pid,nullptr,0);
+            SmallShell::getInstance().set_currentt_pid_fg(-1);
             jobs->removeJobById(job->getJobId());
         }
     }
@@ -529,8 +575,9 @@ void AliasCommand::execute() {
             }
         }
     }
-    //todo check if reserved or exiting
-    if(SmallShell::getInstance().find_alias(alias)){
+
+    if(SmallShell::getInstance().find_alias(alias) || SmallShell::getInstance
+    ().isBuiltInCommand(alias.c_str())){
         std::cerr << "smash error: alias: <name> already exists or is a reserved command" << std::endl;
         return;
     }
@@ -884,24 +931,27 @@ void JobsList::killAllJobs() {
     }
 }
 
+JobsList::JobsList(): max_job_id(0) {}
+
 JobsList::JobEntry::JobEntry(long job_id, Command *cmd, bool isStopped):
 job_id(job_id),cmd(cmd),isStopped(isStopped) {}
 
 
 RedirectionCommand::RedirectionCommand(const char *cmd_line, Command *command) : Command(cmd_line), command(command) {
-    isOverride = !containsTwoArrow(cmd_line);
-    istringstream iss(cmd_line);
-    for (std::string s; iss >> s;){
-        if(s == ">>" || s == ">")
-            iss >> file;
-        break;
-    }
-
+    isOverride = !contains(cmd_line,">>");
+    string cmdl = string(cmd_line);
+    size_t pos = cmdl.find('>');
+    file = cmdl.substr(isOverride?pos+2:pos+1);
 }
 
-void RedirectionCommand::execute() {// todo
+void RedirectionCommand::execute() {
     int saved_stdout = dup(1);
-    close(1);
+    if(saved_stdout < 0){
+        std::cerr << "smash error: " << "dup" << " failed" << endl;
+    }
+    if(close(1) < 0){
+        std::cerr << "smash error: " << "close" << " failed" << endl;
+    }
     int fd = open(file,  O_CREAT | O_WRONLY | (isOverride ? O_TRUNC : O_APPEND) , 0644);
     dup2(fd, 1);
     close(fd);
@@ -928,7 +978,6 @@ void PipeCommand::execute() {
         dup2(fd[1],1);
         close(fd[1]);
         firstCommand->execute();
-        waitpid(pid,nullptr,0);
         exit(1);
     }
     pid_t pid2 = fork();

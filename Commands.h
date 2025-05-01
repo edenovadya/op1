@@ -231,6 +231,7 @@ private:
     std::string last_dir;
     std::string chprompt;
     JobsList jobs;
+     pid_t  current_pid_fg;
     std::unordered_map<std::string,std::string> alias;
 
 public:
@@ -247,6 +248,7 @@ public:
 
     ~SmallShell();
     void executeCommand(const char *cmd_line);
+    Command* CommandByFirstWord(const char *cmd_line);
     void setChprompt(std::string newChprompt = "Smash");
     std::string getChprompt() const;
     std::string alias_preparse_Cmd(const char *cmd_line);
