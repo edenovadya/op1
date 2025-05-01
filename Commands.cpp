@@ -2,15 +2,30 @@
 #include <string.h>
 #include <iostream>
 #include <vector>
-#include <sstream>
 #include <sys/wait.h>
 #include <iomanip>
 #include "Commands.h"
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <cstring>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <complex>
 #include <set>
-#include <fstream>
 #include <iterator>
 #include <Regex>
 #include <signal.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <linux/route.h>
+#include <fcntl.h>
+#include <string>
 
 using namespace std;
 
@@ -133,6 +148,31 @@ bool isNumber(const std::string &s) {
     }
     for (int i = 0; i < s.length(); i++) {
         if (!isdigit(s[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool containsArrow(const std::string &s) {
+
+    if (s.empty()) {
+        return false;
+    }
+    for (int i = 0; i < s.length(); i++) {
+        if (s[i] == '>' && s[i + 1] == '>') {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool containsTwoArrow(const std::string &s) {
+    if (s.empty()) {
+        return false;
+    }
+    for (int i = 0; i < s.length(); i++) {
+        if (s[i] != '>' && s[i+1] == '>' && s[i + 2] != '>') {
             return false;
         }
     }
@@ -743,19 +783,90 @@ void WatchProcCommand::execute() override {
     return;
 }
 
-ExternalCommand::ExternalCommand(const char *cmd_line): Command(cmd_line){}
-void ExternalCommand:: execute() override {
+//todo: external command
+JobsList SmallShell::getJobs() const {
+    return jobs;
+}
+
+ExternalCommand::ExternalCommand(const char *cmd_line) : Command(cmd_line) {}
+
+void ExternalCommand::execute() override {
     std::string cmd_string = string(cmd_line);
     cmd_string = _trim(cmd_string);
     _removeBackgroundSignForString(cmd_string);
     background = _isBackgroundComamnd(cmd_line);
     complex = _isComplexComamnd(cmd_line);
 
+    cmd_string = SmallShell::getInstance().alias_preparse_Cmd(cmd_string.c_str());
+    bool reserved = SmallShell::getInstance().isBuiltInCommand(cmd_string.c_str());
+
     char* args[COMMAND_MAX_ARGS];
     int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
 
+    if (reserved) {
+        SmallShell::getInstance().executeCommand(cmd_string.c_str());
+        return;
+    }
 
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("smash error: fork failed");
+        return;
+    }
+
+    if (complex && background) {
+        if (pid == 0) { // child
+            setpgrp();
+            char* const bashArgs[] = {(char*)"/bin/bash", (char*)"-c", (char*)cmd_string.c_str(), nullptr};
+            execv("/bin/bash", bashArgs);
+            perror("smash error: exec failed");
+            exit(1);
+        } else {
+            SmallShell::getInstance().getJobs().addJob(this, pid);
+        }
+    }
+
+    else if (background && !complex) {
+        if (pid == 0) { // child
+            setpgrp();
+            execvp(args[0], args);
+            perror("smash error: exec failed");
+            exit(1);
+        } else {
+            SmallShell::getInstance().getJobs().addJob(this, pid);
+        }
+    }
+
+    else if (!complex && !background) {
+        if (pid == 0) { // child
+            setpgrp();
+            execvp(args[0], args);
+            perror("smash error: exec failed");
+            exit(1);
+        } else {
+            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            waitpid(pid, nullptr, WUNTRACED);
+            SmallShell::getInstance().set_currentt_pid_fg(-1);
+
+        }
+    }
+
+    else if (complex && !background) {
+        if (pid == 0) { // child
+            setpgrp();
+            char* const bashArgs[] = {(char*)"/bin/bash", (char*)"-c", (char*)cmd_string.c_str(), nullptr};
+            execv("/bin/bash", bashArgs);
+            perror("smash error: exec failed");
+            exit(1);
+        } else {
+            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            waitpid(pid, nullptr, WUNTRACED);
+            SmallShell::getInstance().set_currentt_pid_fg(-1);
+
+        }
+    }
 }
+
 
 bool SmallShell::isBuiltInCommand(const char *cmd_line) {
     string cmd_to_check = _trim(string(cmd_line));
@@ -878,6 +989,240 @@ void JobsList::killAllJobs() {
 JobsList::JobEntry::JobEntry(long job_id, Command *cmd, bool isStopped):
 job_id(job_id),cmd(cmd),isStopped(isStopped) {}
 
+pid_t SmallShell::get_currentt_pid_fg() const {
+    return currentt_pid_fg;
+}
 
+void SmallShell::set_currentt_pid_fg(pid_t pid) {
+    this->currentt_pid_fg = pid;
+}
+
+//todo: du command
+DiskUsageCommand::DiskUsageCommand(const char *cmd_line) : Command(cmd_line) {}
+
+void DiskUsageCommand::execute() override {
+    std::string cmd_str = _trim(std::string(cmd_line));
+    bool background = _isBackgroundComamnd(cmd_line);
+
+    if (background) {
+        _removeBackgroundSignForString(cmd_str);
+    }
+
+    char* args[COMMAND_MAX_ARGS];
+    int argc = _parseCommandLine(cmd_str.c_str(), args);
+
+    if (argc > 2) {
+        std::cerr << "smash error: du: too many arguments" << std::endl;
+        return;
+    }
+
+    std::string path = (argc == 2) ? args[1] : ".";
+
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+        std::cerr << "smash error: du: directory " << path << " does not exist" << std::endl;
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("smash error: fork failed");
+        return;
+    }
+
+    if (pid == 0) {
+        setpgrp();
+        size_t total = getDirectorySize(path);
+        std::cout << "Total disk usage: " << (total / 1024) << " KB" << std::endl;
+        exit(0);
+    } else {
+        if (background) {
+            SmallShell::getInstance().getJobs().addJob(this, pid);
+        } else {
+            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            waitpid(pid, nullptr, WUNTRACED);
+            SmallShell::getInstance().set_currentt_pid_fg(-1);
+        }
+    }
+}
+
+size_t DiskUsageCommand::getDirectorySize(const std::string& path) {
+    size_t totalSize = 0;
+    int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY);
+    if (fd < 0) return 0;
+
+    char buf[8192];
+    int nread;
+
+    while ((nread = syscall(SYS_getdents64, fd, buf, sizeof(buf))) > 0) {
+        for (int bpos = 0; bpos < nread;) {
+            struct linux_dirent64* d = (struct linux_dirent64*)(buf + bpos);
+            std::string name = d->d_name;
+
+            if (name == "." || name == "..") {
+                bpos += d->d_reclen;
+                continue;
+            }
+
+            std::string full_path = path + "/" + name;
+            struct stat st;
+            if (lstat(full_path.c_str(), &st) == 0) {
+                if (S_ISDIR(st.st_mode)) {
+                    totalSize += getDirectorySize(full_path);
+                } else {
+                    totalSize += st.st_size;
+                }
+            }
+
+            bpos += d->d_reclen;
+        }
+    }
+    close(fd);
+    return totalSize;
+}
+
+
+//todo: netinfo command
+NetInfo::NetInfo(const char *cmd_line) : Command(cmd_line) {}
+void NetInfo::execute() override {
+    std::string cmd = _trim(std::string(cmd_line));
+    bool background = _isBackgroundComamnd(cmd_line);
+
+    if (background) {
+        _removeBackgroundSignForString(cmd);
+    }
+
+    char* args[COMMAND_MAX_ARGS];
+    int argc = _parseCommandLine(cmd.c_str(), args);
+
+    if (argc != 2) {
+        std::cerr << "smash error: netinfo: interface not specified" << std::endl;
+        return;
+    }
+
+    std::string iface = args[1];
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("smash error: fork failed");
+        return;
+    }
+
+    if (pid == 0) {// Child
+        setpgrp();
+        runNetInfoInternal(iface);
+        exit(0);
+    } else {
+        if (background) {
+            SmallShell::getInstance().getJobs().addJob(this, pid);
+        } else {
+            SmallShell::getInstance().set_currentt_pid_fg(pid);
+            waitpid(pid, nullptr, WUNTRACED);
+            SmallShell::getInstance().set_currentt_pid_fg(-1);
+        }
+    }
+}
+
+void NetInfo::runNetInfoInternal(const std::string& iface) {
+        int sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock < 0) {
+            perror("socket");
+            return;
+        }
+
+        struct ifreq ifr;
+        strncpy(ifr.ifr_name, iface.c_str(), IFNAMSIZ);
+
+        // בדיקת תקפות הממשק
+        if (ioctl(sock, SIOCGIFADDR, &ifr) < 0) {
+            std::cerr << "smash error: netinfo: interface " << iface << " does not exist" << std::endl;
+            close(sock);
+            return;
+        }
+
+        // כתובת IP
+        struct sockaddr_in* ipaddr = (struct sockaddr_in*)&ifr.ifr_addr;
+        std::cout << "IP Address: " << inet_ntoa(ipaddr->sin_addr) << std::endl;
+
+        // מסיכת רשת
+        if (ioctl(sock, SIOCGIFNETMASK, &ifr) == 0) {
+            struct sockaddr_in* netmask = (struct sockaddr_in*)&ifr.ifr_netmask;
+            std::cout << "Subnet Mask: " << inet_ntoa(netmask->sin_addr) << std::endl;
+        }
+
+        // שער ברירת מחדל (default gateway)
+        std::string gateway = getDefaultGateway();
+        if (!gateway.empty()) {
+            std::cout << "Default Gateway: " << gateway << std::endl;
+        }
+
+        // שרתי DNS מתוך /etc/resolv.conf
+        printDNSServers();
+
+        close(sock);
+    }
+
+std::string NetInfo::getDefaultGateway() {
+    int fd = open("/proc/net/route", O_RDONLY);
+    if (fd < 0) return "";
+
+    char buf[8192];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return "";
+
+    buf[n] = '\0';
+    std::istringstream iss(buf);
+    std::string line;
+    getline(iss, line); // skip header
+
+    while (getline(iss, line)) {
+        std::istringstream ss(line);
+        std::string iface, dest, gateway;
+        ss >> iface >> dest >> gateway;
+
+        if (dest == "00000000") {
+            unsigned long g;
+            sscanf(gateway.c_str(), "%lx", &g);
+            struct in_addr addr;
+            addr.s_addr = g;
+            return inet_ntoa(addr);
+        }
+    }
+    return "";
+}
+
+void NetInfo::printDNSServers() {
+    int fd = open("/etc/resolv.conf", O_RDONLY);
+    if (fd < 0) return;
+
+    char buf[8192];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return;
+
+    buf[n] = '\0';
+    std::istringstream iss(buf);
+    std::string line;
+    std::vector<std::string> dns_servers;
+
+    while (getline(iss, line)) {
+        if (line.find("nameserver") == 0) {
+            std::istringstream ls(line);
+            std::string tag, ip;
+            ls >> tag >> ip;
+            dns_servers.push_back(ip);
+        }
+    }
+
+    if (!dns_servers.empty()) {
+        std::cout << "DNS Servers: ";
+        for (size_t i = 0; i < dns_servers.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << dns_servers[i];
+        }
+        std::cout << std::endl;
+    }
+}
 
 
