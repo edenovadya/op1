@@ -1509,8 +1509,7 @@ void PipeCommand::execute() {
         exit(1);
     }
 
-    SmallShell::getInstance().set_current_pid_fg(pid1);
-    SmallShell::getInstance().set_current_pid_fg(pid2);
+
 
     if (close(fd[0]) == -1) {
         perror("smash error: close failed");
@@ -1530,7 +1529,6 @@ void PipeCommand::execute() {
         return;
     }
 
-    SmallShell::getInstance().set_current_pid_fg(-1);
 }
 
 

@@ -262,7 +262,7 @@ public:
     void set_current_pid_fg(pid_t pid);
     JobsList getJobs() const;
     void executeCommand(const char *cmd_line);
-    void setChprompt(std::string newChprompt = "Smash");
+    void setChprompt(std::string newChprompt = "smash");
     std::string getChprompt() const;
     std::string alias_preparse_Cmd(const char *cmd_line);
     bool find_alias(std::string alias);
