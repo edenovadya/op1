@@ -4,6 +4,7 @@
 #include <signal.h>
 #include "Commands.h"
 #include "signals.h"
+#include <cstring>
 
 int main(int argc, char *argv[]) {
     if (signal(SIGINT, ctrlCHandler) == SIG_ERR) {
@@ -16,7 +17,8 @@ int main(int argc, char *argv[]) {
         std::cout << smash.getChprompt() <<"> ";
         std::string cmd_line;
         std::getline(std::cin, cmd_line);
-        smash.executeCommand(cmd_line.c_str());
+        smash.executeCommand(strdup(cmd_line.c_str()));
+
     }
     return 0;
 }

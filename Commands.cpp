@@ -113,14 +113,15 @@ int _parseCommandLine(const char *cmd_line, char **args) {
     FUNC_EXIT()
 }
 
+
 bool _isBackgroundComamnd(const char *cmd_line) {
     const string str(cmd_line);
     return str[str.find_last_not_of(WHITESPACE)] == '&';
 }
 
-bool _isComplexComamnd(const char *cmd_line) {
-    const string str(cmd_line);
-    return (str[str.find_last_not_of(WHITESPACE)] == ('*') || str[str.find_last_not_of(WHITESPACE)] == ('?'));
+bool _isComplexCommand(const char* cmd_line) {
+    std::string str(cmd_line);
+    return str.find('*') != std::string::npos || str.find('?') != std::string::npos;
 }
 
 bool _isBackgroundComamndForString(const std::string& cmd_line) {
@@ -235,9 +236,9 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
     firstWord = symbols_cleanup(firstWord);
-
     if (firstWord.compare("chprompt") == 0) {
         return new Chprompt(cmd_line);
+        std::cout <<"CommandByFirstWord"<< cmd_line << std::endl;
 
     }else if (firstWord.compare("showpid") == 0) {
         return new ShowPidCommand(cmd_line);
@@ -320,7 +321,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 void SmallShell::executeCommand(const char *cmd_line) {
      Command* cmd = CreateCommand(cmd_line);
      cmd->execute();
-     delete cmd;
+     //delete cmd;
 }
 
 BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
@@ -430,7 +431,7 @@ void ChangeDirCommand::execute() {
             return;
         }
 
-        *plastPwd = std::string(curr_dir);
+    *plastPwd = std::string(curr_dir);
     } else {
         char curr_dir[COMMAND_MAX_LENGTH];
         if (getcwd(curr_dir, sizeof(curr_dir)) == nullptr) {
@@ -718,7 +719,7 @@ void UnSetEnvCommand::execute()  {
         }
         return;
     }
-    for (int i = 0; i < num_of_args; i++) {
+    for (int i = 1; i < num_of_args; i++) {
         const char* var_name = args[i];
         if (getenv(var_name) == nullptr) {
             std::cerr << "smash error: unsetenv: " << var_name << " does not exist" << std::endl;
@@ -728,7 +729,7 @@ void UnSetEnvCommand::execute()  {
             return;
         }
         if (unsetenv(var_name) != 0) {
-            //perror("smash error: unsetenv failed");
+            perror("smash error: unsetenv failed");
             for (int j = 0; j < num_of_args; j++) {
                 free(args[j]);
             }
@@ -859,18 +860,17 @@ void WatchProcCommand::execute()  {
 
 
 //todo: external command
-JobsList SmallShell::getJobs() const {
+JobsList& SmallShell::getJobs() {
     return jobs;
 }
 
 ExternalCommand::ExternalCommand(const char *cmd_line): Command(cmd_line){}
-void ExternalCommand:: execute()  {
+void ExternalCommand:: execute() {
     std::string cmd_string = string(cmd_line);
     cmd_string = _trim(cmd_string);
     _removeBackgroundSignForString(cmd_string);
     background = _isBackgroundComamnd(cmd_line);
-    complex = _isComplexComamnd(cmd_line);
-
+    complex = _isComplexCommand(cmd_line);
     cmd_string = SmallShell::getInstance().alias_preparse_Cmd(cmd_string.c_str());
     bool reserved = SmallShell::getInstance().isBuiltInCommand(cmd_string.c_str());
 
@@ -938,6 +938,7 @@ void ExternalCommand:: execute()  {
     }
 
     else if (complex && !background) {
+        std::cout<<cmd_string<<std::endl;
         if (pid == 0) { // child
             if (setpgrp() == -1) {
                 perror("smash error: setpgrp failed");
@@ -949,7 +950,7 @@ void ExternalCommand:: execute()  {
             exit(1);
         } else {
             SmallShell::getInstance().set_current_pid_fg(pid);
-            if(waitpid(pid, nullptr, WUNTRACED==-1)) {
+            if(waitpid(pid, nullptr, WUNTRACED)==-1) {
                 perror("smash error: waitpid failed");
                 return;
             }
@@ -1034,8 +1035,8 @@ void JobsList::removeFinishedJobs() {
 int JobsList::get_max_job_id() const{
     return max_job_id;
 };
-void JobsList::addJob(Command *cmd, bool isStopped){
-    jobs.push_back(JobEntry(++max_job_id,cmd,isStopped));
+void JobsList::addJob(Command *cmd, pid_t pid){
+    jobs.push_back(JobEntry(++max_job_id,cmd,pid));
 }
 
 JobsList::JobEntry *JobsList::getJobById(int jobId) {
@@ -1090,8 +1091,8 @@ void JobsList::killAllJobs() {
 
 JobsList::JobsList(): max_job_id(0) {}
 
-JobsList::JobEntry::JobEntry(long job_id, Command *cmd, bool isStopped):
-job_id(job_id),cmd(cmd),isStopped(isStopped) {}
+JobsList::JobEntry::JobEntry(long job_id, Command *cmd, pid_t pid):
+job_id(job_id),cmd(cmd),isStopped(false),pid(pid) {}
 
 pid_t SmallShell::get_current_pid_fg() const {
     return current_pid_fg;
@@ -1106,11 +1107,6 @@ DiskUsageCommand::DiskUsageCommand(const char *cmd_line) : Command(cmd_line) {}
 
 void DiskUsageCommand::execute() {
     std::string cmd_str = _trim(std::string(cmd_line));
-    bool background = _isBackgroundComamnd(cmd_line);
-
-    if (background) {
-        _removeBackgroundSignForString(cmd_str);
-    }
 
     char* args[COMMAND_MAX_ARGS];
     int argc = _parseCommandLine(cmd_str.c_str(), args);
@@ -1134,7 +1130,7 @@ void DiskUsageCommand::execute() {
         return;
     }
 
-    if (pid == 0) {
+    if (pid == 0) {        // Child process
         if (setpgrp() == -1) {
             perror("smash error: setpgrp failed");
             exit(1);
@@ -1143,16 +1139,10 @@ void DiskUsageCommand::execute() {
         size_t total = getDirectorySize(path);
         std::cout << "Total disk usage: " << (total / 1024) << " KB" << std::endl;
         exit(0);
-    } else {
-        if (background) {
-            SmallShell::getInstance().getJobs().addJob(this, pid);
-        } else {
-            SmallShell::getInstance().set_current_pid_fg(pid);
-            if (waitpid(pid, nullptr, WUNTRACED) == -1) {
-                perror("smash error: waitpid failed");
-                return;
-            }
-            SmallShell::getInstance().set_current_pid_fg(-1);
+    } else {        // Parent process (foreground)
+        if (waitpid(pid, nullptr, WUNTRACED) == -1) {
+            perror("smash error: waitpid failed");
+            return;
         }
     }
 }
@@ -1213,11 +1203,6 @@ NetInfo::NetInfo(const char *cmd_line) : Command(cmd_line) {}
 
 void NetInfo::execute() {
     std::string cmd = _trim(std::string(cmd_line));
-    bool background = _isBackgroundComamnd(cmd_line);
-
-    if (background) {
-        _removeBackgroundSignForString(cmd);
-    }
 
     char* args[COMMAND_MAX_ARGS];
     int argc = _parseCommandLine(cmd.c_str(), args);
@@ -1242,16 +1227,10 @@ void NetInfo::execute() {
         }
         runNetInfoInternal(iface);
         exit(0);
-    } else {
-        if (background) {
-            SmallShell::getInstance().getJobs().addJob(this, pid);
-        } else {
-            SmallShell::getInstance().set_current_pid_fg(pid);
-            if (waitpid(pid, nullptr, WUNTRACED) == -1) {
-                perror("smash error: waitpid failed");
-                return;
-            }
-            SmallShell::getInstance().set_current_pid_fg(-1);
+    } else {         // Parent - always run in foreground
+        if (waitpid(pid, nullptr, WUNTRACED) == -1) {
+            perror("smash error: waitpid failed");
+            return;
         }
     }
 }
