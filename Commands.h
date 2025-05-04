@@ -137,7 +137,7 @@ public:
         bool isStopped;
        pid_t pid;
     public:
-        JobEntry(long job_id,Command *cmd, bool isStopped = false);
+        JobEntry(long job_id,Command *cmd, pid_t pid);
         pid_t getPid() const;
         long getJobId() const;
         bool isJobStopped() const;
@@ -158,7 +158,7 @@ public:
 
     void setMaxJobId(int max_job_id);
 
-    void addJob(Command *cmd, bool isStopped = false);
+    void addJob(Command *cmd, pid_t pid);
 
     void printJobsList();
 
@@ -260,7 +260,8 @@ public:
     ~SmallShell()= default;
     pid_t get_current_pid_fg() const ;
     void set_current_pid_fg(pid_t pid);
-    JobsList getJobs() const;
+
+    JobsList& getJobs();
     void executeCommand(const char *cmd_line);
     void setChprompt(std::string newChprompt = "Smash");
     std::string getChprompt() const;
