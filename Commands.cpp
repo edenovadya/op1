@@ -101,8 +101,7 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) {
 int _parseCommandLine(const char *cmd_line, char **args) {
     FUNC_ENTRY()
     int i = 0;
-    std::istringstream iss(_trim(SmallShell::getInstance().alias_preparse_Cmd
-    (cmd_line)));
+    std::istringstream iss(_trim(SmallShell::getInstance().alias_preparse_Cmd(cmd_line)));
     for (std::string s; iss >> s;) {
         args[i] = (char *) malloc(s.length() + 1);
         memset(args[i], 0, s.length() + 1);
@@ -232,6 +231,7 @@ SmallShell::SmallShell():chprompt("smash"), last_dir(""), current_pid_fg(-1) {
 }
 
 Command *SmallShell::CommandByFirstWord(const char *cmd_line){
+
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
     firstWord = symbols_cleanup(firstWord);
@@ -278,9 +278,12 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
     }else if(firstWord.compare("whoami") == 0){
         return new WhoAmICommand(cmd_line);
 
-    }else {
+    }else if(!string(cmd_line).empty()) {
         return new ExternalCommand(cmd_line);
+    }else{
+        return nullptr;
     }
+
 }
 
 /**
@@ -288,20 +291,29 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
     string cmd_s = _trim(string(alias_preparse_Cmd(cmd_line)));
-    if(contains(cmd_s,">") && (cmd_s.rfind(">") == cmd_s.find(">") || cmd_s
-    .rfind(">") - cmd_s.find(">") == 1)){
-        return new RedirectionCommand(cmd_s.c_str(),CommandByFirstWord(cmd_s.c_str()));
+
+    size_t first_gt = cmd_s.find('>');
+    size_t second_gt = cmd_s.find('>', first_gt + 1);
+    bool is_valid_redirection = (first_gt != string::npos && second_gt == string::npos)
+                                || (second_gt == first_gt + 1 && cmd_s.find('>', second_gt + 1) == string::npos);
+
+    if(is_valid_redirection){
+        return new RedirectionCommand(cmd_line,CommandByFirstWord(cmd_line));
     }else if(contains(cmd_s,"|")){
         int pos = cmd_s.find("|");
-        string first_command = _trim(cmd_s.substr(0,pos));
-        string second_command = _trim(cmd_s.substr(pos+1));
+        bool isCerr = contains(cmd_s,"|&");
 
-        return new PipeCommand(cmd_line,CommandByFirstWord(first_command
-        .c_str()),CommandByFirstWord(second_command.c_str()), contains(cmd_s,
-                                                                       "|&"));
+        string* first_command = new string(_trim(cmd_s.substr(0,pos)));
+        string* second_command = new string(_trim(cmd_s.substr
+                (isCerr?pos+2:pos+1)));
+
+        Command* first = CommandByFirstWord(first_command->c_str());
+        Command* second = CommandByFirstWord(second_command->c_str());
+
+        return new PipeCommand(cmd_line,first,second, isCerr);
 
     }else{
-        return CommandByFirstWord(cmd_s.c_str());
+        return CommandByFirstWord(cmd_line);
     }
 }
 
@@ -314,7 +326,8 @@ void SmallShell::executeCommand(const char *cmd_line) {
 BuiltInCommand::BuiltInCommand(const char *cmd_line) : Command(cmd_line) {}
 
 //todo: chprompt
-Chprompt::Chprompt(const char *cmd_line) : BuiltInCommand(cmd_line) {}
+Chprompt::Chprompt(const char *cmd_line) : BuiltInCommand(cmd_line) {
+}
 
 void SmallShell::setChprompt(std::string newChprompt) {
     chprompt = newChprompt;
@@ -613,29 +626,22 @@ AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
 
 void AliasCommand::execute() {
-    char *args[20];
-    int arg_num = _parseCommandLine(cmd_line, args);
+    string line = SmallShell::getInstance().alias_preparse_Cmd(cmd_line);
     std::string alias;
     std::string alias_value;
-    bool seen = false;
-    for (int i = 1; i < arg_num; i++) {
-        if (seen) {
-            alias_value += args[i];
-            //seen = string(args[i]).find('=') == -1?false:true;
-        }else{
-            int j = 0;
-            while (args[i][j] != '\0') {
-                if (args[i][j] == '=') {
-                    seen = true;
-                    continue;
-                } else if (seen) {
-                    alias_value += args[i][j];
-                } else {
-                    alias += args[i][j];
-                }
-            }
-        }
-    }
+
+    size_t line_len = line.size();
+    size_t eq_pos = line.find('=');
+    size_t alias_pos = line.find("alias");
+    size_t wrap_pos = line.find('\'');
+    size_t wrap_pos2 = line.find('\'',wrap_pos + 1);
+
+
+    alias = _trim(line.substr(alias_pos+5,eq_pos-(alias_pos+5)));
+    alias_value = _trim(line.substr(wrap_pos+1,wrap_pos2-(wrap_pos+1)));
+
+    std::cout << "alias:" << alias << "alias_value:" << alias_value <<
+    std::endl;
     //todo check if reserved or exiting
     if(SmallShell::getInstance().find_alias(alias)|| SmallShell::getInstance
             ().isBuiltInCommand(alias.c_str())){
@@ -1387,7 +1393,7 @@ RedirectionCommand::RedirectionCommand(const char *cmd_line, Command *command) :
     isOverride = !contains(cmd_line,">>");
     string cmdl = string(cmd_line);
     size_t pos = cmdl.find('>');
-    file = cmdl.substr(isOverride?pos+2:pos+1);
+    file = _trim(cmdl.substr(isOverride?pos+1:pos+2));
 }
 
 
@@ -1397,13 +1403,12 @@ void RedirectionCommand::execute() {
         perror("smash error: dup failed");
         return;
     }
-
-    if (close(1) == -1) {
-        perror("smash error: close failed");
-        close(saved_stdout);
-        return;
-    }
-
+//    std::cout.flush();
+//    if (close(1) == -1) {
+//        perror("smash error: close failed");
+//        close(saved_stdout);
+//        return;
+//    }
     int fd = open(file.c_str(), O_CREAT | O_WRONLY | (isOverride ? O_TRUNC : O_APPEND), 0644);
     if (fd == -1) {
         perror("smash error: open failed");
@@ -1411,7 +1416,6 @@ void RedirectionCommand::execute() {
         close(saved_stdout);
         return;
     }
-
     if (dup2(fd, 1) == -1) {
         perror("smash error: dup2 failed");
         close(fd);
@@ -1419,23 +1423,20 @@ void RedirectionCommand::execute() {
         close(saved_stdout);
         return;
     }
-
-    if (close(fd) == -1) {
-        perror("smash error: close failed");
-        return;
-    }
-
+//    if (close(fd) == -1) {
+//        perror("smash error: close failed");
+//        return;
+//    }
     command->execute();
-
     if (dup2(saved_stdout, 1) == -1) {
         perror("smash error: dup2 failed");
         return;
     }
-
-    if (close(saved_stdout) == -1) {
-        perror("smash error: close failed");
-        return;
-    }
+//    std::cout << "test8" << std::endl;
+//    if (close(saved_stdout) == -1) {
+//        perror("smash error: close failed");
+//        return;
+//    }
 }
 
 
