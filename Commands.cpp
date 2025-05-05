@@ -604,7 +604,7 @@ void KillCommand::execute()  {
     }
 
     cout << "signal number " << signal_number << " was sent to pid " << job->getPid() << endl;
-    if (kill(job->getPid(), abs(signal_number)) == -1) {
+    if (syscall(SYS_kill, job->getPid(), abs(signal_number)) == -1) {
         perror("smash error: kill failed");
         for (int i = 0; i < num_of_args; i++) {
             free(args[i]);
@@ -612,7 +612,7 @@ void KillCommand::execute()  {
         return;
     }
 
-    if (signal_number == SIGKILL) {
+    if (abs(signal_number) == SIGKILL) {
         jobs->removeJobById(job_id);
         jobs->setMaxJobId(jobs->findNewMaxJobId());
     }
