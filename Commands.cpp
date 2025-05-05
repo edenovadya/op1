@@ -146,7 +146,7 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
     iss >> firstWord;
 
     firstWord = symbols_cleanup(firstWord);
-    _removeBackgroundSignForString(firstWord);
+   // _removeBackgroundSignForString(firstWord);
 
     string restOfLine;
     getline(iss, restOfLine);
