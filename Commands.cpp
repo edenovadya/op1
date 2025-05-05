@@ -2,7 +2,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
-#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <complex>
@@ -11,16 +10,9 @@
 #include <cstring>
 #include <vector>
 #include <set>
-#include <iterator>
 #include <regex>
-#include <complex>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <iomanip>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <net/if.h>
-#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <linux/route.h>
@@ -237,13 +229,15 @@ SmallShell::SmallShell() : chprompt("smash"), last_dir(""), current_pid_fg(-1) {
 }
 
 Command *SmallShell::CommandByFirstWord(const char *cmd_line){
-
     string cmd_s = _trim(string(cmd_line));
+    _removeBackgroundSignForString(cmd_s);
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
+//    char* args[20];
+//    int arg_num = _parseCommandLine(cmd_line,args);
 
-    if(firstWord != cmd_s){
-        _removeBackgroundSignForString(firstWord);
-    }
+//    if(firstWord != cmd_s){
+//        _removeBackgroundSignForString(firstWord);
+//    }
     if (firstWord.compare("chprompt") == 0) {
         return new Chprompt(cmd_line);
         std::cout <<"CommandByFirstWord"<< cmd_line << std::endl;
@@ -353,7 +347,12 @@ std::string SmallShell::getChprompt() const {
 
 void Chprompt::execute() {
     char* args[20];
-    _parseCommandLine(cmd_line,args);
+    string line = _trim(string(cmd_line));
+
+    _removeBackgroundSignForString(line);
+
+   _parseCommandLine(line.c_str(),args);
+
     if (args[1] == nullptr){
         SmallShell::getInstance().setChprompt();
     }else{
@@ -1205,6 +1204,7 @@ void DiskUsageCommand::execute() {
 
     if (cmd_line) {
         std::string trimmed = _trim(std::string(cmd_line));
+        _removeBackgroundSignForString(trimmed);
         char* args[COMMAND_MAX_ARGS];
         int argc = _parseCommandLine(trimmed.c_str(), args);
         if (argc > 2) {
