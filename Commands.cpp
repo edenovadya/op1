@@ -1,4 +1,11 @@
 #include "Commands.h"
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <complex>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -20,6 +27,9 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <sys/syscall.h>
+#include <stdint.h>
+extern char **environ;
+
 #include <cstdint>
 
 struct linux_dirent64 {
@@ -31,7 +41,7 @@ struct linux_dirent64 {
 };
 
 using namespace std;
-
+#define BUFFER_SIZE 4096
 const std::string WHITESPACE = " \n\r\t\f\v";
 
 #if 0
@@ -67,29 +77,7 @@ string symbols_cleanup(const std::string &s) {
     if(output.find('>') != std::string::npos){
         output = output.substr(0,output.find('>'));
     }
-    if(output.find('&') != std::string::npos){
-        output = output.substr(0,output.find('&'));
-    }
     return output;
-}
-std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
-    string trimmed = _trim(string(cmd_line));
-    istringstream iss(trimmed);
-    string firstWord;
-    iss >> firstWord;
-
-    firstWord = symbols_cleanup(firstWord);
-
-    string restOfLine;
-    getline(iss, restOfLine);
-    restOfLine = _trim(restOfLine);
-
-    if (find_alias(firstWord)) {
-        firstWord = get_alias(firstWord);
-    }
-
-    string newCommandLine = firstWord + " " + restOfLine;
-    return newCommandLine;
 }
 
 int _parseCommandLine(const char *cmd_line, char **args) {
@@ -159,6 +147,28 @@ void _removeBackgroundSignForString(std::string& cmd_line) {
     cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
 }
 
+std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
+    string trimmed = _trim(string(cmd_line));
+    istringstream iss(trimmed);
+    string firstWord;
+    iss >> firstWord;
+
+    firstWord = symbols_cleanup(firstWord);
+    _removeBackgroundSignForString(firstWord);
+
+    string restOfLine;
+    getline(iss, restOfLine);
+    restOfLine = _trim(restOfLine);
+
+    if (find_alias(firstWord)) {
+        firstWord = get_alias(firstWord);
+    }
+
+    string newCommandLine = firstWord + " " + restOfLine;
+    return newCommandLine;
+}
+
+
 bool isNumber(const std::string &s) {
     if (s.empty()) {
         return false;
@@ -217,19 +227,23 @@ bool contains(const std::string &s1,const std::string &s2){
 Command::Command(const char *cmd_line):cmd_line(cmd_line) {}
 
 
-SmallShell::SmallShell():chprompt("smash"), last_dir(""), current_pid_fg(-1) {
+SmallShell::SmallShell() : chprompt("smash"), last_dir(""), current_pid_fg(-1) {
     char cwd[COMMAND_MAX_LENGTH];
-    if (getcwd(cwd, COMMAND_MAX_LENGTH) == nullptr) {
-        std::perror("smash error:getcwd failed\n");
+    if (syscall(SYS_getcwd, cwd, COMMAND_MAX_LENGTH) == -1) {
+        std::perror("smash error: getcwd failed");
+    } else {
+        current_dir = std::string(cwd);
     }
-    current_dir = string(cwd);
 }
 
 Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
-    firstWord = symbols_cleanup(firstWord);
+
+    if(firstWord != cmd_s){
+        _removeBackgroundSignForString(firstWord);
+    }
     if (firstWord.compare("chprompt") == 0) {
         return new Chprompt(cmd_line);
         std::cout <<"CommandByFirstWord"<< cmd_line << std::endl;
@@ -272,6 +286,9 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 
     }else if(firstWord.compare("whoami") == 0){
         return new WhoAmICommand(cmd_line);
+
+    }else if(firstWord.compare("netinfo") == 0){
+    return new NetInfo(cmd_line);
 
     }else if(!string(cmd_line).empty()) {
         return new ExternalCommand(cmd_line);
@@ -348,18 +365,21 @@ void Chprompt::execute() {
 //todo: showpid command
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 void ShowPidCommand::execute()  {
-    std::cout << "smash pid is " << getpid() << std::endl;
+    pid_t pid = syscall(SYS_getpid);
+    std::cout << "smash pid is " << pid << std::endl;
 }
 
 //todo: GetCurrDirCommand
 GetCurrDirCommand::GetCurrDirCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 void GetCurrDirCommand::execute()  {
     char* cwd = new char[COMMAND_MAX_LENGTH];
-    if(getcwd(cwd, COMMAND_MAX_LENGTH) == nullptr){
-        //std::perror("smash error:getcwd failed\n");
+
+    if (syscall(SYS_getcwd, cwd, COMMAND_MAX_LENGTH) == -1) {
+        std::perror("smash error: getcwd failed");
         delete[] cwd;
         return;
     }
+
     std::cout << cwd << std::endl;
     delete[] cwd;
 }
@@ -386,7 +406,7 @@ void ChangeDirCommand::execute() {
 
     if (num_of_args == 1) {
         char cwd[COMMAND_MAX_LENGTH];
-        if (getcwd(cwd, sizeof(cwd)) == nullptr) {
+        if (syscall(SYS_getcwd, cwd, sizeof(cwd)) == -1) {
             perror("smash error: getcwd failed");
             for (int i = 0; i < num_of_args; i++) {
                 free(args[i]);
@@ -411,7 +431,7 @@ void ChangeDirCommand::execute() {
         }
 
         char curr_dir[COMMAND_MAX_LENGTH];
-        if (getcwd(curr_dir, sizeof(curr_dir)) == nullptr) {
+        if (syscall(SYS_getcwd, curr_dir, sizeof(curr_dir)) == -1) {
             perror("smash error: getcwd failed");
             for (int i = 0; i < num_of_args; i++) {
                 free(args[i]);
@@ -419,7 +439,7 @@ void ChangeDirCommand::execute() {
             return;
         }
 
-        if (chdir(plastPwd->c_str()) == -1) {
+        if (syscall(SYS_chdir, plastPwd->c_str()) == -1) {
             perror("smash error: chdir failed");
             for (int i = 0; i < num_of_args; i++) {
                 free(args[i]);
@@ -427,10 +447,10 @@ void ChangeDirCommand::execute() {
             return;
         }
 
-    *plastPwd = std::string(curr_dir);
+        *plastPwd = std::string(curr_dir);
     } else {
         char curr_dir[COMMAND_MAX_LENGTH];
-        if (getcwd(curr_dir, sizeof(curr_dir)) == nullptr) {
+        if (syscall(SYS_getcwd, curr_dir, sizeof(curr_dir)) == -1) {
             perror("smash error: getcwd failed");
             for (int i = 0; i < num_of_args; i++) {
                 free(args[i]);
@@ -438,7 +458,7 @@ void ChangeDirCommand::execute() {
             return;
         }
 
-        if (chdir(args[1]) == -1) {
+        if (syscall(SYS_chdir, args[1]) == -1) {
             perror("smash error: chdir failed");
             for (int i = 0; i < num_of_args; i++) {
                 free(args[i]);
@@ -511,18 +531,20 @@ void QuitCommand::execute()  {
     cmd_string = _trim(cmd_string);
     char* args[COMMAND_MAX_ARGS];
     int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+
     if (num_of_args >= 2 && strcmp(args[1], "kill") == 0) {
         jobs->KillForQuitCommand();
-        for(int i=0; i<num_of_args; i++){
+        for(int i = 0; i < num_of_args; i++) {
             free(args[i]);
         }
-        exit(0);
+        syscall(SYS_exit, 0);
     }
+
     if (num_of_args >= 1) {
-        for(int i=0; i<num_of_args; i++){
+        for(int i = 0; i < num_of_args; i++) {
             free(args[i]);
         }
-        exit(0);
+        syscall(SYS_exit, 0);
     }
 }
 
@@ -531,15 +553,14 @@ void JobsList::KillForQuitCommand() {
     std::cout << "smash: sending SIGKILL signal to " << jobs.size() << " jobs:" << std::endl;
     for (auto job : jobs) {
         std::cout << job.getPid() << ": " << job.getCmd()->getCmdLine() << std::endl;
-        if (kill(job.getPid(), SIGKILL) == -1) {
+        if (syscall(SYS_kill, job.getPid(), SIGKILL) == -1) {
             perror("smash error: kill failed");
             return;
         }
     }
     if (jobs.size() == 0) {
         max_job_id = 0;
-    }
-    else {
+    } else {
         max_job_id = findNewMaxJobId();
     }
 }
@@ -556,7 +577,7 @@ int JobsList::findNewMaxJobId() const {
 
 //todo: KillCommand
 KillCommand::KillCommand(const char *cmd_line, JobsList *jobs) : BuiltInCommand(cmd_line) , jobs(jobs) {}
-void KillCommand::execute()  {
+void KillCommand::execute() {
     std::string cmd_string = string(cmd_line);
     if (_isBackgroundComamndForString(cmd_string)) {
         _removeBackgroundSignForString(cmd_string);
@@ -604,24 +625,24 @@ void KillCommand::execute()  {
     }
 
     cout << "signal number " << signal_number << " was sent to pid " << job->getPid() << endl;
-    if (syscall(SYS_kill, job->getPid(), abs(signal_number)) == -1) {
-        perror("smash error: kill failed");
-        for (int i = 0; i < num_of_args; i++) {
-            free(args[i]);
+        if (syscall(SYS_kill, job->getPid(), abs(signal_number)) == -1) {
+                    perror("smash error: kill failed");
+                    for (int i = 0; i < num_of_args; i++) {
+                        free(args[i]);
+                    }
+                    return;
+                }
+
+            if (abs(signal_number) == SIGKILL) {
+                jobs->removeJobById(job_id);
+                jobs->setMaxJobId(jobs->findNewMaxJobId());
+            }
+
+            for (int i = 0; i < num_of_args; i++) {
+                free(args[i]);
+            }
+            return;
         }
-        return;
-    }
-
-    if (abs(signal_number) == SIGKILL) {
-        jobs->removeJobById(job_id);
-        jobs->setMaxJobId(jobs->findNewMaxJobId());
-    }
-
-    for (int i = 0; i < num_of_args; i++) {
-        free(args[i]);
-    }
-    return;
-}
 
 //todo: alias command
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
@@ -717,62 +738,99 @@ void SmallShell::remove_alias(std::string alias) {
 //todo: UnSetEnvCommand
 UnSetEnvCommand::UnSetEnvCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 void UnSetEnvCommand::execute()  {
-    std::string cmd_string = string(cmd_line);
+    std::string cmd_string(cmd_line);
     if (_isBackgroundComamndForString(cmd_string)) {
         _removeBackgroundSignForString(cmd_string);
     }
     cmd_string = _trim(cmd_string);
+
     char* args[COMMAND_MAX_ARGS];
     int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
-    if (num_of_args == 1) {
-        std::cout << "smash error: unsetenv: not enough arguments" << std::endl;
-        for (int i = 0; i < num_of_args; i++) {
-            free(args[i]);
-        }
+
+    if (num_of_args <= 1) {
+        std::cerr << "smash error: unsetenv: not enough arguments" << std::endl;
+        for (int i = 0; i < num_of_args; ++i) free(args[i]);
         return;
     }
-    for (int i = 1; i < num_of_args; i++) {
+
+    for (int i = 1; i < num_of_args; ++i) {
         const char* var_name = args[i];
-        if (getenv(var_name) == nullptr) {
-            std::cerr << "smash error: unsetenv: " << var_name << " does not exist" << std::endl;
-            for (int j = 0; j < num_of_args; j++) {
-                free(args[j]);
-            }
+        bool found = false;
+
+        int fd = open("/proc/self/environ", O_RDONLY);
+        if (fd == -1) {
+            perror("smash error: cannot open /proc/self/environ");
+            for (int j = 0; j < num_of_args; ++j) free(args[j]);
             return;
         }
-        if (unsetenv(var_name) != 0) {
-            perror("smash error: unsetenv failed");
-            for (int j = 0; j < num_of_args; j++) {
-                free(args[j]);
-            }
+
+        constexpr size_t BUF_SIZE = 8192;
+        char buffer[BUF_SIZE];
+        ssize_t bytes_read = read(fd, buffer, BUF_SIZE);
+        close(fd);
+
+        if (bytes_read <= 0) {
+            perror("smash error: failed to read /proc/self/environ");
+            for (int j = 0; j < num_of_args; ++j) free(args[j]);
             return;
+        }
+
+        size_t pos = 0;
+        while (pos < (size_t)bytes_read) {
+            const char* entry = &buffer[pos];
+            size_t len = strlen(entry);
+            if (strncmp(entry, var_name, strlen(var_name)) == 0 && entry[strlen(var_name)] == '=') {
+                found = true;
+                break;
+            }
+            pos += len + 1;
+        }
+
+        if (!found) {
+            std::cerr << "smash error: unsetenv: " << var_name << " does not exist" << std::endl;
+            continue;
+        }
+
+        std::vector<char*> new_env;
+        for (int j = 0; environ[j] != nullptr; ++j) {
+            if (strncmp(environ[j], var_name, strlen(var_name)) == 0 &&
+                environ[j][strlen(var_name)] == '=') {
+                continue; // skip the variable to delete
+            }
+            new_env.push_back(environ[j]);
+        }
+        new_env.push_back(nullptr);
+
+        for (size_t j = 0; j < new_env.size(); ++j) {
+            environ[j] = new_env[j];
         }
     }
+
+    for (int i = 0; i < num_of_args; ++i) {
+        free(args[i]);
+    }
+
 }
 
 //todo:WatchProcCommand
 WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
-void WatchProcCommand::execute()  {
-    std::string cmd_string = string(cmd_line);
-    if (_isBackgroundComamndForString(cmd_string)) {
-        _removeBackgroundSignForString(cmd_string);
-    }
-    cmd_string = _trim(cmd_string);
+void WatchProcCommand::execute() {
     char* args[COMMAND_MAX_ARGS];
-    int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
-
+    int num_of_args = _parseCommandLine(cmd_line, args);
     if (num_of_args != 2 || !isNumber(args[1])) {
-        std::cerr << "smash error: watchproc: invalid arguments" << std::endl;
+        write(STDERR_FILENO, "smash error: watchproc: invalid arguments\n", 42);
         for (int i = 0; i < num_of_args; i++) free(args[i]);
         return;
     }
 
-    pid_t pid = std::stoi(args[1]);
+    pid_t pid = atoi(args[1]);
+    char buf[512];
 
-    if (kill(pid, 0) == -1) {
+    if (syscall(SYS_kill, pid, 0) == -1) {
         if (errno == ESRCH) {
-            std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
+            int len = snprintf(buf, sizeof(buf), "smash error: watchproc: pid %d does not exist\n", pid);
+            write(STDERR_FILENO, buf, len);
         } else {
             perror("smash error: kill failed");
         }
@@ -780,95 +838,109 @@ void WatchProcCommand::execute()  {
         return;
     }
 
-    std::string stat_path = "/proc/" + std::to_string(pid) + "/stat";
-    int stat_fd = open(stat_path.c_str(), O_RDONLY);
-    if (stat_fd == -1) {
-        perror("smash error: open  failed");
-        for (int i = 0; i < num_of_args; i++) free(args[i]);
-        return;
-    }
-
-    char stat_buffer[4096];
-    ssize_t stat_bytes = read(stat_fd, stat_buffer, sizeof(stat_buffer) - 1);
-    if (stat_bytes < 0) {
-        perror("smash error: read failed");
-        close(stat_fd);
-        for (int i = 0; i < num_of_args; i++) free(args[i]);
-        return;
-    }
-    stat_buffer[stat_bytes] = '\0';
-
-    if (close(stat_fd) == -1) {
-        perror("smash error: close failed");
-        return;
-    }
-
-    std::istringstream iss(stat_buffer);
-    std::vector<std::string> stats((std::istream_iterator<std::string>(iss)), {});
-
-    if (stats.size() < 24) {
-        std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
-        for (int i = 0; i < num_of_args; i++) free(args[i]);
-        return;
-    }
-
-    long utime = std::stol(stats[13]);
-    long stime = std::stol(stats[14]);
-    long total_time = utime + stime;
-
-    long clk_ticks_per_sec = sysconf(_SC_CLK_TCK);
-    if (clk_ticks_per_sec == -1) {
+    long clk_ticks = sysconf(_SC_CLK_TCK);
+    if (clk_ticks == -1) {
         perror("smash error: sysconf failed");
         for (int i = 0; i < num_of_args; i++) free(args[i]);
         return;
     }
 
-    double cpu_usage = (double)(total_time) / clk_ticks_per_sec * 100.0;
-
-    std::string status_path = "/proc/" + std::to_string(pid) + "/status";
-    int status_fd = open(status_path.c_str(), O_RDONLY);
-    if (status_fd == -1) {
-        perror("smash error: open failed");
+    // Get initial process and system times
+    long t0_proc_time, t0_total_time;
+    if (!getProcessCPUTime(pid, &t0_proc_time) || !getTotalCPUTime(&t0_total_time)) {
         for (int i = 0; i < num_of_args; i++) free(args[i]);
         return;
     }
 
-    char status_buffer[4096];
-    ssize_t status_bytes = read(status_fd, status_buffer, sizeof(status_buffer) - 1);
-    if (status_bytes < 0) {
-        perror("smash error: read failed");
-        close(status_fd);
+    sleep(1); // delta time window
+
+    // Get updated process and system times
+    long t1_proc_time, t1_total_time;
+    if (!getProcessCPUTime(pid, &t1_proc_time) || !getTotalCPUTime(&t1_total_time)) {
         for (int i = 0; i < num_of_args; i++) free(args[i]);
         return;
     }
-    status_buffer[status_bytes] = '\0';
 
-    if (close(status_fd) == -1) {
-        perror("smash error: close failed");
-        return;
-    }
+    double delta_proc = t1_proc_time - t0_proc_time;
+    double delta_total = t1_total_time - t0_total_time;
+    double cpu_usage = (delta_proc / delta_total) * 100.0;
 
-    std::istringstream status_iss(status_buffer);
-    std::string line;
-    double memory_mb = 0.0;
-    while (getline(status_iss, line)) {
-        if (line.find("VmRSS:") == 0) {
-            std::istringstream mem_iss(line);
-            std::string key;
-            long mem_kb;
-            mem_iss >> key >> mem_kb;
-            memory_mb = mem_kb / 1024.0;
-            break;
-        }
-    }
+    double memory_mb = getMemoryUsageMB(pid);
 
-    std::cout << "PID: " << pid
-              << " | CPU Usage: " << std::fixed << std::setprecision(1) << cpu_usage << "%"
-              << " | Memory Usage: " << std::fixed << std::setprecision(1) << memory_mb << " MB"
-              << std::endl;
+    int len = snprintf(buf, sizeof(buf),
+        "PID: %d | CPU Usage: %.1f%% | Memory Usage: %.1f MB\n",
+        pid, cpu_usage, memory_mb);
+    write(STDOUT_FILENO, buf, len);
 
     for (int i = 0; i < num_of_args; i++) free(args[i]);
 }
+
+bool WatchProcCommand::getProcessCPUTime(pid_t pid, long* total_time) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+    int fd = syscall(SYS_open, path, O_RDONLY);
+    if (fd == -1) return false;
+
+    char buffer[1024];
+    ssize_t bytes = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
+    syscall(SYS_close, fd);
+    if (bytes <= 0) return false;
+    buffer[bytes] = '\0';
+
+    // parse fields 14 and 15 (utime and stime)
+    char* token = buffer;
+    for (int i = 0; i < 13; ++i) token = strchr(token, ' ') + 1;
+    long utime = atol(token);
+    token = strchr(token, ' ') + 1;
+    long stime = atol(token);
+
+    *total_time = utime + stime;
+    return true;
+}
+
+bool WatchProcCommand::getTotalCPUTime(long* total_time) {
+    int fd = syscall(SYS_open, "/proc/stat", O_RDONLY);
+    if (fd == -1) return false;
+
+    char buffer[1024];
+    ssize_t bytes = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
+    syscall(SYS_close, fd);
+    if (bytes <= 0) return false;
+    buffer[bytes] = '\0';
+
+    if (strncmp(buffer, "cpu ", 4) != 0) return false;
+
+    long user, nice, system, idle, iowait, irq, softirq, steal;
+    sscanf(buffer + 4, "%ld %ld %ld %ld %ld %ld %ld %ld",
+        &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal);
+    *total_time = user + nice + system + idle + iowait + irq + softirq + steal;
+    return true;
+}
+
+double WatchProcCommand::getMemoryUsageMB(pid_t pid) {
+    char path[64], buffer[1024];
+    snprintf(path, sizeof(path), "/proc/%d/status", pid);
+    int fd = syscall(SYS_open, path, O_RDONLY);
+    if (fd == -1) return 0;
+
+    ssize_t bytes = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
+    syscall(SYS_close, fd);
+    if (bytes <= 0) return 0;
+    buffer[bytes] = '\0';
+
+    char* line = buffer;
+    while (line && *line) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            long kb;
+            sscanf(line + 6, "%ld", &kb);
+            return kb / 1024.0;
+        }
+        line = strchr(line, '\n');
+        if (line) line++;
+    }
+    return 0;
+}
+
 
 
 //todo: external command
@@ -909,7 +981,7 @@ void ExternalCommand:: execute() {
             char* const bashArgs[] = {(char*)"/bin/bash", (char*)"-c", (char*)cmd_string.c_str(), nullptr};
             execv("/bin/bash", bashArgs);
             perror("smash error: execv failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         } else {
             SmallShell::getInstance().getJobs().addJob(this, pid);
         }
@@ -923,7 +995,7 @@ void ExternalCommand:: execute() {
             }
             execvp(args[0], args);
             perror("smash error: execvp failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         } else {
             SmallShell::getInstance().getJobs().addJob(this, pid);
         }
@@ -937,7 +1009,7 @@ void ExternalCommand:: execute() {
             }
             execvp(args[0], args);
             perror("smash error: execvp failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         } else {
             SmallShell::getInstance().set_current_pid_fg(pid);
             if(waitpid(pid, nullptr, WUNTRACED)==-1) {
@@ -959,7 +1031,7 @@ void ExternalCommand:: execute() {
             char* const bashArgs[] = {(char*)"/bin/bash", (char*)"-c", (char*)cmd_string.c_str(), nullptr};
             execv("/bin/bash", bashArgs);
             perror("smash error: execv failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         } else {
             SmallShell::getInstance().set_current_pid_fg(pid);
             if(waitpid(pid, nullptr, WUNTRACED)==-1) {
@@ -1090,7 +1162,7 @@ JobsList::JobEntry *JobsList::getLastStoppedJob(int jobId) {
 void JobsList::killAllJobs() {
     for(auto it = jobs.begin(); it != jobs.end(); it++){
         if(!it->isJobStopped()){
-            if(kill(it->getPid(), SIGKILL) == -1) {
+            if(syscall(SYS_kill, it->getPid(), SIGKILL) == -1) {
                 perror("smash error: kill failed");
                 return;
             }
@@ -1129,51 +1201,51 @@ void SmallShell::print_alias() const {
 DiskUsageCommand::DiskUsageCommand(const char *cmd_line) : Command(cmd_line) {}
 
 void DiskUsageCommand::execute() {
-    std::string cmd_str = _trim(std::string(cmd_line));
+    std::string path = ".";
 
-    char* args[COMMAND_MAX_ARGS];
-    int argc = _parseCommandLine(cmd_str.c_str(), args);
-
-    if (argc > 2) {
-        std::cerr << "smash error: du: too many arguments" << std::endl;
-        return;
+    if (cmd_line) {
+        std::string trimmed = _trim(std::string(cmd_line));
+        char* args[COMMAND_MAX_ARGS];
+        int argc = _parseCommandLine(trimmed.c_str(), args);
+        if (argc > 2) {
+            write(STDERR_FILENO, "smash error: du: too many arguments\n", 36);
+            return;
+        }
+        if (argc == 2)
+            path = args[1];
     }
-
-    std::string path = (argc == 2) ? args[1] : ".";
 
     struct stat st;
-    if (stat(path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-        std::cerr << "smash error: du: directory " << path << " does not exist" << std::endl;
+    if (syscall(SYS_stat, path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+        std::string msg = "smash error: du: directory " + path + " does not exist\n";
+        write(STDERR_FILENO, msg.c_str(), msg.size());
         return;
     }
 
-    pid_t pid = fork();
+    pid_t pid = syscall(SYS_fork);
     if (pid < 0) {
         perror("smash error: fork failed");
         return;
     }
 
-    if (pid == 0) {        // Child process
-        if (setpgrp() == -1) {
+    if (pid == 0) {  // Child
+        if (syscall(SYS_setpgid, 0, 0) == -1) {
             perror("smash error: setpgrp failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         }
 
         size_t total = getDirectorySize(path);
-        std::cout << "Total disk usage: " << (total / 1024) << " KB" << std::endl;
-        exit(0);
-    } else {        // Parent process (foreground)
-        if (waitpid(pid, nullptr, WUNTRACED) == -1) {
-            perror("smash error: waitpid failed");
-            return;
-        }
+        std::string output = "Total disk usage: " + std::to_string((total + 1023) / 1024) + " KB\n";
+        write(STDOUT_FILENO, output.c_str(), output.size());
+        syscall(SYS_exit, 0);
+    } else {  // Parent
+        syscall(SYS_wait4, pid, nullptr, 0, nullptr);
     }
 }
 
-
 size_t DiskUsageCommand::getDirectorySize(const std::string& path) {
     size_t totalSize = 0;
-    int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY);
+    int fd = syscall(SYS_open, path.c_str(), O_RDONLY | O_DIRECTORY);
     if (fd < 0) {
         perror("smash error: open failed");
         return 0;
@@ -1186,35 +1258,31 @@ size_t DiskUsageCommand::getDirectorySize(const std::string& path) {
         for (int bpos = 0; bpos < nread;) {
             struct linux_dirent64* d = (struct linux_dirent64*)(buf + bpos);
             std::string name = d->d_name;
+            bpos += d->d_reclen;
 
-            if (name == "." || name == "..") {
-                bpos += d->d_reclen;
-                continue;
-            }
+            if (name == "." || name == "..") continue;
 
             std::string full_path = path + "/" + name;
             struct stat st;
-            if (lstat(full_path.c_str(), &st) == -1) {
+            if (syscall(SYS_lstat, full_path.c_str(), &st) == -1) {
                 perror("smash error: lstat failed");
-                exit(0);
-            } else if (S_ISDIR(st.st_mode)) {
-                totalSize += getDirectorySize(full_path);
-            } else {
-                totalSize += st.st_size;
+                continue;
             }
 
-            bpos += d->d_reclen;
+            if (S_ISDIR(st.st_mode)) {
+                totalSize += getDirectorySize(full_path);
+            } else if (!S_ISLNK(st.st_mode)) {
+                totalSize += st.st_size;
+            }
         }
     }
 
     if (nread == -1) {
         perror("smash error: getdents64 failed");
-        exit(0);
     }
 
-    if (close(fd) == -1) {
+    if (syscall(SYS_close, fd) == -1) {
         perror("smash error: close failed");
-        exit(0);
     }
 
     return totalSize;
@@ -1224,168 +1292,178 @@ size_t DiskUsageCommand::getDirectorySize(const std::string& path) {
 //todo: netinfo command
 NetInfo::NetInfo(const char *cmd_line) : Command(cmd_line) {}
 
+void NetInfo::printStr(const char* str) {
+    syscall(SYS_write, STDOUT_FILENO, str, strlen(str));
+}
+
+void NetInfo::printStrLn(const char* str) {
+    printStr(str);
+    syscall(SYS_write, STDOUT_FILENO, "\n", 1);
+}
+
+void NetInfo::printIP(const char* label, struct in_addr addr) {
+    printStr(label);
+    printStr(inet_ntoa(addr));
+    syscall(SYS_write, STDOUT_FILENO, "\n", 1);
+}
+
+// ========== MAIN EXECUTION ==========
 void NetInfo::execute() {
     std::string cmd = _trim(std::string(cmd_line));
-
     char* args[COMMAND_MAX_ARGS];
     int argc = _parseCommandLine(cmd.c_str(), args);
 
-    if (argc != 2) {
-        std::cerr << "smash error: netinfo: interface not specified" << std::endl;
+    if (argc == 1) {
+        printStrLn("smash error: netinfo: interface not specified");
         return;
     }
 
-    std::string iface = args[1];
+    if (argc > 2) {
+        printStr("smash error: netinfo: interface");
+        for (int i = 1; i < argc; ++i) {
+            printStr(" ");
+            printStr(args[i]);
+        }
+        printStrLn(" does not exist");
+        return;
+    }
 
-    pid_t pid = fork();
+    const char* iface = args[1];
+
+    pid_t pid = syscall(SYS_fork);
     if (pid < 0) {
         perror("smash error: fork failed");
         return;
     }
 
-    if (pid == 0) { // Child
-        if (setpgrp() == -1) {
+    if (pid == 0) {  // Child
+        if (syscall(SYS_setpgid, 0, 0) == -1) {
             perror("smash error: setpgrp failed");
-            exit(1);
+            syscall(SYS_exit, 1);
         }
         runNetInfoInternal(iface);
-        exit(0);
-    } else {         // Parent - always run in foreground
-        if (waitpid(pid, nullptr, WUNTRACED) == -1) {
-            perror("smash error: waitpid failed");
-            return;
-        }
+        syscall(SYS_exit, 0);
+    } else {
+        syscall(SYS_wait4, pid, nullptr, 0, nullptr);
     }
 }
 
-
-void NetInfo::runNetInfoInternal(const std::string& iface) {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+// ========== runNetInfoInternal ==========
+void NetInfo::runNetInfoInternal(const char* iface) {
+    int sock = syscall(SYS_socket, AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
         perror("smash error: socket failed");
         return;
     }
 
     struct ifreq ifr;
-    strncpy(ifr.ifr_name, iface.c_str(), IFNAMSIZ);
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, iface, IFNAMSIZ);
 
-    if (ioctl(sock, SIOCGIFADDR, &ifr) < 0) {
-        std::cerr << "smash error: netinfo: interface " << iface << " does not exist" << std::endl;
-        if (close(sock) == -1) {
-            perror("smash error: close failed");
-            return;
-        }
+    if (syscall(SYS_ioctl, sock, SIOCGIFADDR, &ifr) < 0) {
+        printStr("smash error: netinfo: interface ");
+        printStr(iface);
+        printStrLn(" does not exist");
+        syscall(SYS_close, sock);
         return;
     }
 
     struct sockaddr_in* ipaddr = (struct sockaddr_in*)&ifr.ifr_addr;
-    std::cout << "IP Address: " << inet_ntoa(ipaddr->sin_addr) << std::endl;
+    printIP("IP Address: ", ipaddr->sin_addr);
 
-    if (ioctl(sock, SIOCGIFNETMASK, &ifr) == -1) {
+    if (syscall(SYS_ioctl, sock, SIOCGIFNETMASK, &ifr) < 0) {
         perror("smash error: ioctl (SIOCGIFNETMASK) failed");
-        return;
     } else {
         struct sockaddr_in* netmask = (struct sockaddr_in*)&ifr.ifr_netmask;
-        std::cout << "Subnet Mask: " << inet_ntoa(netmask->sin_addr) << std::endl;
+        printIP("Subnet Mask: ", netmask->sin_addr);
     }
 
-    std::string gateway = getDefaultGateway();
-    if (!gateway.empty()) {
-        std::cout << "Default Gateway: " << gateway << std::endl;
-    }
-
+    getDefaultGateway(iface);
     printDNSServers();
 
-    if (close(sock) == -1) {
-        perror("smash error: close failed");
-        return;
-    }
+    syscall(SYS_close, sock);
 }
 
-
-std::string NetInfo::getDefaultGateway() {
-    int fd = open("/proc/net/route", O_RDONLY);
+// ========== getDefaultGateway ==========
+void NetInfo::getDefaultGateway(const char* iface) {
+    int fd = syscall(SYS_open, "/proc/net/route", O_RDONLY);
     if (fd < 0) {
         perror("smash error: open failed");
-        return "";
+        return;
     }
 
     char buf[8192];
-    ssize_t n = read(fd, buf, sizeof(buf) - 1);
-    if (n < 0) {
+    ssize_t n = syscall(SYS_read, fd, buf, sizeof(buf) - 1);
+    if (n <= 0) {
         perror("smash error: read failed");
-        close(fd);
-        return "";
+        syscall(SYS_close, fd);
+        return;
     }
-
-    if (close(fd) == -1) {
-        perror("smash error: close failed");
-        return "";
-    }
+    syscall(SYS_close, fd);
 
     buf[n] = '\0';
-    std::istringstream iss(buf);
-    std::string line;
-    getline(iss, line); // skip headerf
 
-    while (getline(iss, line)) {
-        std::istringstream ss(line);
-        std::string iface, dest, gateway;
-        ss >> iface >> dest >> gateway;
+    char* line = strtok(buf, "\n");
+    line = strtok(nullptr, "\n");  // Skip header
 
-        if (dest == "00000000") {
-            unsigned long g;
-            if (sscanf(gateway.c_str(), "%lx", &g) == 1) {
-                struct in_addr addr;
-                addr.s_addr = g;
-                return inet_ntoa(addr);
+    while (line) {
+        char ifaceName[IFNAMSIZ], dest[32], gateway[32];
+        sscanf(line, "%s %s %s", ifaceName, dest, gateway);
+
+        if (strcmp(ifaceName, iface) == 0 && strcmp(dest, "00000000") == 0) {
+            unsigned long gw;
+            if (sscanf(gateway, "%lx", &gw) == 1) {
+                struct in_addr gaddr;
+                gaddr.s_addr = gw;
+                printIP("Default Gateway: ", gaddr);
+                return;
             }
         }
+
+        line = strtok(nullptr, "\n");
     }
-    return "";
+
+    printStrLn("Default Gateway: Unavailable");
 }
 
+// ========== printDNSServers ==========
 void NetInfo::printDNSServers() {
-    int fd = open("/etc/resolv.conf", O_RDONLY);
+    int fd = syscall(SYS_open, "/etc/resolv.conf", O_RDONLY);
     if (fd < 0) {
         perror("smash error: open failed");
         return;
     }
 
     char buf[8192];
-    ssize_t n = read(fd, buf, sizeof(buf) - 1);
-    if (n < 0) {
+    ssize_t n = syscall(SYS_read, fd, buf, sizeof(buf) - 1);
+    if (n <= 0) {
         perror("smash error: read failed");
-        close(fd);
+        syscall(SYS_close, fd);
         return;
     }
-
-    if (close(fd) == -1) {
-        perror("smash error: close failed");
-        return;
-    }
+    syscall(SYS_close, fd);
 
     buf[n] = '\0';
-    std::istringstream iss(buf);
-    std::string line;
-    std::vector<std::string> dns_servers;
+    char* line = strtok(buf, "\n");
 
-    while (getline(iss, line)) {
-        if (line.find("nameserver") == 0) {
-            std::istringstream ls(line);
-            std::string tag, ip;
-            ls >> tag >> ip;
-            dns_servers.push_back(ip);
+    bool first = true;
+    while (line) {
+        if (strncmp(line, "nameserver", 10) == 0) {
+            char tag[16], ip[64];
+            sscanf(line, "%s %s", tag, ip);
+            if (first) {
+                printStr("DNS Servers: ");
+                first = false;
+            } else {
+                printStr(", ");
+            }
+            printStr(ip);
         }
+        line = strtok(nullptr, "\n");
     }
 
-    if (!dns_servers.empty()) {
-        std::cout << "DNS Servers: ";
-        for (size_t i = 0; i < dns_servers.size(); ++i) {
-            if (i > 0) std::cout << ", ";
-            std::cout << dns_servers[i];
-        }
-        std::cout << std::endl;
+    if (!first) {
+        syscall(SYS_write, STDOUT_FILENO, "\n", 1);
     }
 }
 
@@ -1400,45 +1478,44 @@ RedirectionCommand::RedirectionCommand(const char *cmd_line, Command *command) :
 
 
 void RedirectionCommand::execute() {
-    int saved_stdout = dup(1);
+    int saved_stdout = syscall(SYS_dup, STDOUT_FILENO);
     if (saved_stdout == -1) {
         perror("smash error: dup failed");
         return;
     }
-//    std::cout.flush();
-//    if (close(1) == -1) {
-//        perror("smash error: close failed");
-//        close(saved_stdout);
-//        return;
-//    }
-    int fd = open(file.c_str(), O_CREAT | O_WRONLY | (isOverride ? O_TRUNC : O_APPEND), 0644);
+
+    int flags = O_CREAT | O_WRONLY | (isOverride ? O_TRUNC : O_APPEND);
+    int fd = syscall(SYS_open, file.c_str(), flags, 0644);
     if (fd == -1) {
         perror("smash error: open failed");
-        dup2(saved_stdout, 1);
-        close(saved_stdout);
+        syscall(SYS_dup2, saved_stdout, STDOUT_FILENO); // שחזור stdout
+        syscall(SYS_close, saved_stdout);
         return;
     }
-    if (dup2(fd, 1) == -1) {
+
+    if (syscall(SYS_dup2, fd, STDOUT_FILENO) == -1) {
         perror("smash error: dup2 failed");
-        close(fd);
-        dup2(saved_stdout, 1);
-        close(saved_stdout);
+        syscall(SYS_close, fd);
+        syscall(SYS_dup2, saved_stdout, STDOUT_FILENO); // שחזור stdout
+        syscall(SYS_close, saved_stdout);
         return;
     }
-//    if (close(fd) == -1) {
-//        perror("smash error: close failed");
-//        return;
-//    }
+
+    if (syscall(SYS_close, fd) == -1) {
+        perror("smash error: close failed");
+    }
+
     command->execute();
-    if (dup2(saved_stdout, 1) == -1) {
-        perror("smash error: dup2 failed");
+
+    if (syscall(SYS_dup2, saved_stdout, STDOUT_FILENO) == -1) {
+        perror("smash error: dup2 restore failed");
+        syscall(SYS_close, saved_stdout);
         return;
     }
-//    std::cout << "test8" << std::endl;
-//    if (close(saved_stdout) == -1) {
-//        perror("smash error: close failed");
-//        return;
-//    }
+
+    if (syscall(SYS_close, saved_stdout) == -1) {
+        perror("smash error: close failed");
+    }
 }
 
 
@@ -1451,74 +1528,80 @@ PipeCommand::PipeCommand(const char *cmd_line, Command* firstCommand,
 
 void PipeCommand::execute() {
     int fd[2];
-    if (pipe(fd) == -1) {
+    if (syscall(SYS_pipe, fd) == -1) {
         perror("smash error: pipe failed");
         return;
     }
 
-    pid_t pid1 = fork();
+    pid_t pid1 = syscall(SYS_fork);
     if (pid1 < 0) {
         perror("smash error: fork failed");
-        close(fd[0]);
-        close(fd[1]);
+        syscall(SYS_close, fd[0]);
+        syscall(SYS_close, fd[1]);
         return;
     } else if (pid1 == 0) {
-        if(setpgrp()==-1) {
+        if (setpgrp()==-1) {
             perror("smash error: setpgrp failed");
-            return;
+            syscall(SYS_exit, 0);
         }
-        if (close(fd[0]) == -1) {
+
+        if (syscall(SYS_close, fd[0]) == -1) {
             perror("smash error: close failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         }
-        if (dup2(fd[1], 1) == -1) {
+
+        if (syscall(SYS_dup2, fd[1], 1) == -1) {
             perror("smash error: dup2 failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         }
-        if (close(fd[1]) == -1) {
+
+        if (syscall(SYS_close, fd[1]) == -1) {
             perror("smash error: close failed");
-            return;
+            syscall(SYS_exit, 0);
         }
+
         firstCommand->execute();
-        exit(1);
+        syscall(SYS_exit, 0);
     }
 
-    pid_t pid2 = fork();
+    pid_t pid2 = syscall(SYS_fork);
     if (pid2 < 0) {
         perror("smash error: fork failed");
-        close(fd[0]);
-        close(fd[1]);
+        syscall(SYS_close, fd[0]);
+        syscall(SYS_close, fd[1]);
         waitpid(pid1, nullptr, 0);
         return;
     } else if (pid2 == 0) {
-        if(setpgrp()==-1) {
+        if (setpgrp()==-1) {
             perror("smash error: setpgrp failed");
-            return;
+            syscall(SYS_exit, 0);
         }
-        if (close(fd[1]) == -1) {
+
+        if (syscall(SYS_close, fd[1]) == -1) {
             perror("smash error: close failed");
-            exit(1);
+            syscall(SYS_exit, 0);
         }
-        if (dup2(fd[0], 0) == -1) {
+
+        if (syscall(SYS_dup2, fd[0], 0) == -1) {
             perror("smash error: dup2 failed");
-            return;
-            exit(1);
+            syscall(SYS_exit, 0);
         }
-        if (close(fd[0]) == -1) {
+
+        if (syscall(SYS_close, fd[0]) == -1) {
             perror("smash error: close failed");
-            return;
+            syscall(SYS_exit, 0);
         }
+
         secondCommand->execute();
-        exit(1);
+        syscall(SYS_exit, 0);
     }
 
-
-
-    if (close(fd[0]) == -1) {
+    if (syscall(SYS_close, fd[0]) == -1) {
         perror("smash error: close failed");
         return;
     }
-    if (close(fd[1]) == -1) {
+
+    if (syscall(SYS_close, fd[1]) == -1) {
         perror("smash error: close failed");
         return;
     }
@@ -1527,11 +1610,11 @@ void PipeCommand::execute() {
         perror("smash error: waitpid failed");
         return;
     }
+
     if (waitpid(pid2, nullptr, 0) == -1) {
         perror("smash error: waitpid failed");
         return;
     }
-
 }
 
 
@@ -1539,18 +1622,46 @@ void PipeCommand::execute() {
 WhoAmICommand::WhoAmICommand(const char *cmd_line) : Command(cmd_line) {}
 
 void WhoAmICommand::execute() {
-    uid_t uid = getuid();
-    struct passwd* pw = getpwuid(uid);
-    if (pw == nullptr) {
-        perror("smash error: getpwuid failed");
+    uid_t uid = syscall(SYS_getuid);
+
+    int fd = syscall(SYS_open, "/etc/passwd", O_RDONLY, 0);
+    if (fd == -1) {
+        perror("smash error: open failed");
         return;
     }
 
-    if (pw->pw_name == nullptr || pw->pw_dir == nullptr) {
-        std::cerr << "smash error: failed to retrieve user info" << std::endl;
+    char buf[8192];
+    ssize_t bytesRead = syscall(SYS_read, fd, buf, sizeof(buf) - 1);
+    if (bytesRead == -1) {
+        perror("smash error: read failed");
+        syscall(SYS_close, fd);
         return;
     }
 
-    std::cout << pw->pw_name << " " << pw->pw_dir << std::endl;
+    buf[bytesRead] = '\0';
+    syscall(SYS_close, fd);
+
+    char* line = strtok(buf, "\n");
+    while (line != nullptr) {
+        char* saveptr = nullptr;
+        char* name = strtok_r(line, ":", &saveptr);
+        strtok_r(nullptr, ":", &saveptr); // skip x
+        char* uidStr = strtok_r(nullptr, ":", &saveptr);
+        strtok_r(nullptr, ":", &saveptr); // skip gid
+        strtok_r(nullptr, ":", &saveptr); // skip info
+        char* home = strtok_r(nullptr, ":", &saveptr);
+
+        if (name && uidStr && home) {
+            uid_t entry_uid = static_cast<uid_t>(atoi(uidStr));
+            if (entry_uid == uid) {
+                std::cout << name << " " << home << std::endl;
+                return;
+            }
+        }
+
+        line = strtok(nullptr, "\n");
+    }
+
+    std::cerr << "smash error: failed to retrieve user info" << std::endl;
 }
 
