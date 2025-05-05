@@ -363,6 +363,9 @@ void Chprompt::execute() {
 ShowPidCommand::ShowPidCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 void ShowPidCommand::execute()  {
     pid_t pid = syscall(SYS_getpid);
+    if (pid < 0) {
+        perror("smash error: getpid failed");
+    }
     std::cout << "smash pid is " << pid << std::endl;
 }
 
