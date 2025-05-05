@@ -4,6 +4,7 @@
 #include <vector>
 #include <list>
 #include <unordered_map>
+#include <netinet/in.h>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -78,12 +79,20 @@ class NetInfo : public Command {
     // TODO: Add your data members **BONUS: 10 Points**
 public:
     NetInfo(const char *cmd_line);
+
+    void printStr(const char *str);
+
     virtual ~NetInfo() = default;
+
+    void printStrLn(const char *str);
+
+    void printIP(const char *label, struct in_addr addr);
+
     void execute() override;
 
-    void runNetInfoInternal(const std::string &iface);
+    void runNetInfoInternal(const char *iface);
 
-    std::string getDefaultGateway();
+    void getDefaultGateway(const char *iface);
 
     void printDNSServers();
 };
@@ -231,6 +240,13 @@ class WatchProcCommand : public BuiltInCommand {
 public:
     WatchProcCommand(const char *cmd_line);
     void execute() override;
+
+    bool getProcessCPUTime(pid_t pid, long *total_time);
+
+    bool getTotalCPUTime(long *total_time);
+
+    double getMemoryUsageMB(pid_t pid);
+
     virtual ~WatchProcCommand() = default;
 };
 
@@ -263,7 +279,7 @@ public:
 
     JobsList& getJobs();
     void executeCommand(const char *cmd_line);
-    void setChprompt(std::string newChprompt = "smash");
+    void setChprompt(std::string newChprompt = "Smash");
     std::string getChprompt() const;
     std::string alias_preparse_Cmd(const char *cmd_line);
     bool find_alias(std::string alias);
