@@ -1,31 +1,26 @@
-#include <unistd.h>
-#include <cstring>
-#include <iostream>
-#include <vector>
-#include <sys/wait.h>
-#include <iomanip>
 #include "Commands.h"
-#include <ifaddrs.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <net/if.h>
+#include <iostream>
+#include <string>
 #include <cstring>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <complex>
+#include <vector>
 #include <set>
 #include <iterator>
 #include <regex>
-#include <csignal>
+#include <complex>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <iomanip>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <linux/route.h>
 #include <fcntl.h>
-#include <string>
 #include <pwd.h>
 #include <sys/syscall.h>
-#include <stdint.h>
+#include <cstdint>
 
 struct linux_dirent64 {
     uint64_t        d_ino;
@@ -77,8 +72,7 @@ string symbols_cleanup(const std::string &s) {
     }
     return output;
 }
-
-std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) {
+std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
     string trimmed = _trim(string(cmd_line));
     istringstream iss(trimmed);
     string firstWord;
@@ -88,10 +82,10 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) {
 
     string restOfLine;
     getline(iss, restOfLine);
+    restOfLine = _trim(restOfLine);
 
-    auto it = alias.find(firstWord);
-    if (it != alias.end()) {
-        firstWord = it->second;
+    if (find_alias(firstWord)) {
+        firstWord = get_alias(firstWord);
     }
 
     string newCommandLine = firstWord + " " + restOfLine;
@@ -298,8 +292,10 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     bool is_valid_redirection = (first_gt != string::npos && second_gt == string::npos)
                                 || (second_gt == first_gt + 1 && cmd_s.find('>', second_gt + 1) == string::npos);
 
+    string* command = new string(_trim(cmd_s.substr(0,first_gt)));
+
     if(is_valid_redirection){
-        return new RedirectionCommand(cmd_line,CommandByFirstWord(cmd_line));
+        return new RedirectionCommand(cmd_line,CommandByFirstWord(command->c_str()));
     }else if(contains(cmd_s,"|")){
         int pos = cmd_s.find("|");
         bool isCerr = contains(cmd_s,"|&");
@@ -473,30 +469,36 @@ ForegroundCommand::ForegroundCommand(const char *cmd_line, JobsList *jobs)
 void ForegroundCommand::execute() {
     char* args[20];
     int arg_num = _parseCommandLine(cmd_line,args);
+    JobsList::JobEntry* job;
+
+    if(arg_num == 1 && jobs->isJobsListEmpty()) {
+        std::cerr << "smash error: fg: jobs list is empty" << std::endl;
+        return;
+    }else if (arg_num == 1){
+        job = jobs->getLastJob(jobs->get_max_job_id());
+    }
+
+
+    if(arg_num > 2 || (!isNumber(args[1]) && arg_num == 2)){
+        std::cerr << "smash error: fg: invalid arguments" << std::endl;
+        return;
+    }
     char* end;
     long val = strtol(args[1], &end, 10);
 
-    if ((args[1] == end && arg_num == 2)|| arg_num > 2) {
-        std::cerr << "smash error: fg: invalid arguments" << std::endl;
-    }else{
-        JobsList::JobEntry* job = args[1] == end?jobs->getLastJob(jobs->get_max_job_id()):jobs->getJobById(val);
-        if(jobs->getJobById(val) == nullptr){
-            if(arg_num == 1){
-                std::cerr << "smash error: fg: jobs list is empty" << std::endl;
-            }else{
-                std::cerr << "smash error: fg: job-id " <<val <<" does not exist" << std::endl;
-            }
-        }else{
-            pid_t pid = job->getPid();
-            SmallShell::getInstance().set_current_pid_fg(pid);
-            if(waitpid(pid,nullptr,0) == -1) {
-                perror("smash error: waitpid failed");
-                return;
-            }
-            SmallShell::getInstance().set_current_pid_fg(-1);
-            jobs->removeJobById(job->getJobId());
-        }
+    job = jobs->getJobById(val);
+    if(jobs->getJobById(val) == nullptr){
+        std::cerr << "smash error: fg: job-id " <<val <<" does not exist" << std::endl;
+        return;
     }
+    pid_t pid = job->getPid();
+    SmallShell::getInstance().set_current_pid_fg(pid);
+    if(waitpid(pid,nullptr,0) == -1) {
+        perror("smash error: waitpid failed");
+        return;
+    }
+    SmallShell::getInstance().set_current_pid_fg(-1);
+    jobs->removeJobById(job->getJobId());
 }
 
 //todo:Quit Command
@@ -627,11 +629,14 @@ AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
 
 void AliasCommand::execute() {
-    string line = SmallShell::getInstance().alias_preparse_Cmd(cmd_line);
+    string line = _trim(SmallShell::getInstance()
+            .alias_preparse_Cmd(cmd_line));
+    _removeBackgroundSignForString(line);
+    char *args[20];
+    int arg_num = _parseCommandLine(line.c_str(), args);
     std::string alias;
     std::string alias_value;
 
-    size_t line_len = line.size();
     size_t eq_pos = line.find('=');
     size_t alias_pos = line.find("alias");
     size_t wrap_pos = line.find('\'');
@@ -641,37 +646,44 @@ void AliasCommand::execute() {
     alias = _trim(line.substr(alias_pos+5,eq_pos-(alias_pos+5)));
     alias_value = _trim(line.substr(wrap_pos+1,wrap_pos2-(wrap_pos+1)));
 
-    std::cout << "alias:" << alias << "alias_value:" << alias_value <<
-    std::endl;
-    //todo check if reserved or exiting
+    //check if reserved or exiting
     if(SmallShell::getInstance().find_alias(alias)|| SmallShell::getInstance
-            ().isBuiltInCommand(alias.c_str())){
+            ().isBuiltInCommand(alias.c_str()) || (access(alias.c_str(), X_OK)
+            == 0 && arg_num != 1)){
         std::cerr << "smash error: alias: " <<alias<< " already exists or is a reserved command" << std::endl;
         return;
     }
-    string cmd_line_str(cmd_line);
     regex pattern(R"(^alias [a-zA-Z0-9_]+='[^']*'$)");
-    if (!regex_search(cmd_line_str, pattern)) {
+    if (!regex_search(_trim(line), pattern) && arg_num != 1) {
         std::cerr << "smash error: alias: invalid alias format" << std::endl;
         return;
     }
-    SmallShell::getInstance().set_alias(alias,alias_value);
+    if(arg_num == 1){
+        SmallShell::getInstance().print_alias();
+    }else{
+        SmallShell::getInstance().set_alias(alias,alias_value);
+    }
 }
 
-bool SmallShell::find_alias(std::string alias) {
-    auto it = this->alias.find(alias);
-    return it != this->alias.end();
+bool SmallShell::find_alias(std::string alias) const{
+    for (const auto& a : this->alias) {
+        if (a.first == alias){
+            return true;
+        }
+    }
+    return false;
 }
-std::string SmallShell::get_alias(std::string alias) {
-    auto it = this->alias.find(alias);
-    if (it != this->alias.end()) {
-        return it->second;
+std::string SmallShell::get_alias(std::string& alias) const{
+    for (auto a : this->alias) {
+        if (a.first == alias){
+            return a.second;
+        }
     }
     return "";
 }
 
-void SmallShell::set_alias(std::string alias,std::string command) {
-    this->alias[alias] = command;
+void SmallShell::set_alias(std::string& alias,std::string& command) {
+    this->alias.emplace_back(alias,command);
 }
 
 //todo: unalias command
@@ -690,16 +702,17 @@ for (int i = 1; i < arg_num; ++i) {
     }else{
         std::cerr << "smash error: unalias: " << args[i] << " alias does not exist"
         << std::endl;
+        return;
     }
 }
 }
 
 void SmallShell::remove_alias(std::string alias) {
-    auto it = this->alias.find(alias);
-    if(it != this->alias.end()){
-        this->alias.erase(it);
+    for (auto it = this->alias.begin(); it != this->alias.end(); ++it) {
+        if (it->first == alias){
+            this->alias.erase(it);
+        }
     }
-
 }
 
 //todo: UnSetEnvCommand
@@ -961,7 +974,7 @@ void ExternalCommand:: execute() {
 }
 
 
-bool SmallShell::isBuiltInCommand(const char *cmd_line) {
+bool SmallShell::isBuiltInCommand(const char *cmd_line) const{
     string cmd_to_check = _trim(string(cmd_line));
     string firstWord = cmd_to_check.substr(0, cmd_to_check.find_first_of(" \n"));
     static const set<string> built_in_commands = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg", "quit",
@@ -1091,6 +1104,10 @@ void JobsList::killAllJobs() {
 
 JobsList::JobsList(): max_job_id(0) {}
 
+bool JobsList::isJobsListEmpty() const {
+    return jobs.empty();
+}
+
 JobsList::JobEntry::JobEntry(long job_id, Command *cmd, pid_t pid):
 job_id(job_id),cmd(cmd),isStopped(false),pid(pid) {}
 
@@ -1100,6 +1117,13 @@ pid_t SmallShell::get_current_pid_fg() const {
 
 void SmallShell::set_current_pid_fg(pid_t pid) {
     this->current_pid_fg = pid;
+}
+
+void SmallShell::print_alias() const {
+    for (auto a : this->alias) {
+        std::cout << a.first << "=\'" << a.second << "\'" << std::endl;
+    }
+
 }
 
 //todo: du command
@@ -1303,7 +1327,7 @@ std::string NetInfo::getDefaultGateway() {
     buf[n] = '\0';
     std::istringstream iss(buf);
     std::string line;
-    getline(iss, line); // skip header
+    getline(iss, line); // skip headerf
 
     while (getline(iss, line)) {
         std::istringstream ss(line);

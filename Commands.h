@@ -176,6 +176,8 @@ public:
 
     JobEntry *getLastStoppedJob(int jobId);
 
+    bool isJobsListEmpty() const;
+
 
     // TODO: Add extra methods or modify exisitng ones as needed
 };
@@ -243,7 +245,7 @@ private:
     std::string chprompt;
     JobsList jobs;
     pid_t current_pid_fg;
-    std::unordered_map<std::string,std::string> alias;
+    std::vector<std::pair<std::string,std::string>> alias;
 
 public:
     Command *CreateCommand(const char *cmd_line);
@@ -265,12 +267,13 @@ public:
     void executeCommand(const char *cmd_line);
     void setChprompt(std::string newChprompt = "smash");
     std::string getChprompt() const;
-    std::string alias_preparse_Cmd(const char *cmd_line);
-    bool find_alias(std::string alias);
-    std::string get_alias(std::string alias);
-    void set_alias(std::string alias,std::string command);
+    std::string alias_preparse_Cmd(const char *cmd_line) const;
+    bool find_alias(std::string alias) const;
+    std::string get_alias(std::string& alias) const;
+    void print_alias() const;
+    void set_alias(std::string& alias,std::string& command);
     void remove_alias(std::string alias);
-    bool isBuiltInCommand(const char *cmd_line);
+    bool isBuiltInCommand(const char *cmd_line) const;
     Command* CommandByFirstWord(const char *cmd_line);
 };
 
