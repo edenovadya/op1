@@ -281,7 +281,7 @@ public:
 
     JobsList& getJobs();
     void executeCommand(const char *cmd_line);
-    void setChprompt(std::string newChprompt = "Smash");
+    void setChprompt(std::string newChprompt = "smash");
     std::string getChprompt() const;
     std::string alias_preparse_Cmd(const char *cmd_line) const;
     bool find_alias(std::string alias) const;
