@@ -584,9 +584,8 @@ void KillCommand::execute()  {
     //checkinf for valid numbers
     int job_id = stoi(args[2]);
     int signal_number = stoi(args[1]);
-    signal_number = abs(signal_number);
 
-    if (signal_number> 31 || signal_number < 1 || job_id < 0) {
+    if (signal_number > -1 || signal_number < -31 || job_id < 0) {
         std::cout << "smash error: kill: invalid arguments" << std::endl;
         for (int i = 0; i < num_of_args; i++) {
             free(args[i]);
@@ -605,7 +604,7 @@ void KillCommand::execute()  {
     }
 
     cout << "signal number " << signal_number << " was sent to pid " << job->getPid() << endl;
-    if (kill(job->getPid(), signal_number) == -1) {
+    if (kill(job->getPid(), abs(signal_number)) == -1) {
         perror("smash error: kill failed");
         for (int i = 0; i < num_of_args; i++) {
             free(args[i]);
@@ -1120,7 +1119,7 @@ void SmallShell::set_current_pid_fg(pid_t pid) {
 }
 
 void SmallShell::print_alias() const {
-    for (auto a : this->alias) {
+    for (const auto& a : this->alias) {
         std::cout << a.first << "=\'" << a.second << "\'" << std::endl;
     }
 
