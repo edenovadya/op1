@@ -67,7 +67,29 @@ string symbols_cleanup(const std::string &s) {
     if(output.find('>') != std::string::npos){
         output = output.substr(0,output.find('>'));
     }
+    if(output.find('&') != std::string::npos){
+        output = output.substr(0,output.find('&'));
+    }
     return output;
+}
+std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
+    string trimmed = _trim(string(cmd_line));
+    istringstream iss(trimmed);
+    string firstWord;
+    iss >> firstWord;
+
+    firstWord = symbols_cleanup(firstWord);
+
+    string restOfLine;
+    getline(iss, restOfLine);
+    restOfLine = _trim(restOfLine);
+
+    if (find_alias(firstWord)) {
+        firstWord = get_alias(firstWord);
+    }
+
+    string newCommandLine = firstWord + " " + restOfLine;
+    return newCommandLine;
 }
 
 int _parseCommandLine(const char *cmd_line, char **args) {
@@ -135,26 +157,6 @@ void _removeBackgroundSignForString(std::string& cmd_line) {
     cmd_line[idx] = ' ';
     // truncate the command line string up to the last non-space character
     cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
-}
-std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
-    string trimmed = _trim(string(cmd_line));
-    istringstream iss(trimmed);
-    string firstWord;
-    iss >> firstWord;
-
-    firstWord = symbols_cleanup(firstWord);
-    _removeBackgroundSignForString(firstWord);
-
-    string restOfLine;
-    getline(iss, restOfLine);
-    restOfLine = _trim(restOfLine);
-
-    if (find_alias(firstWord)) {
-        firstWord = get_alias(firstWord);
-    }
-
-    string newCommandLine = firstWord + " " + restOfLine;
-    return newCommandLine;
 }
 
 bool isNumber(const std::string &s) {
@@ -227,10 +229,7 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 
     string cmd_s = _trim(string(cmd_line));
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
-    if(firstWord != cmd_s){
-        _removeBackgroundSignForString(firstWord);
-    }
-
+    firstWord = symbols_cleanup(firstWord);
     if (firstWord.compare("chprompt") == 0) {
         return new Chprompt(cmd_line);
         std::cout <<"CommandByFirstWord"<< cmd_line << std::endl;
@@ -613,7 +612,7 @@ void KillCommand::execute()  {
         return;
     }
 
-    if (abs(signal_number) == SIGKILL) {
+    if (signal_number == SIGKILL) {
         jobs->removeJobById(job_id);
         jobs->setMaxJobId(jobs->findNewMaxJobId());
     }
