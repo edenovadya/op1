@@ -640,7 +640,6 @@ void KillCommand::execute() {
             }
             return;
         }
-}
 
 //todo: alias command
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
