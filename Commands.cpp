@@ -61,15 +61,25 @@ string _rtrim(const std::string &s) {
 string _trim(const std::string &s) {
     return _rtrim(_ltrim(s));
 }
-string symbols_cleanup(const std::string &s) {
-    string output = s;
-    if(output.find('|') != std::string::npos){
-        output = output.substr(0,output.find('|'));
+void symbols_cleanup(const std::string &s,string* output) {
+    output[0] = s;
+
+    size_t pos_redirection = s.find('>');
+    size_t pos_redirection2 = s.find('>',pos_redirection + 1);
+    size_t pos_pipe = s.find('|');
+    size_t pos_pipe_end = s.find('&',pos_pipe + 1);
+
+
+    if(s.find('>') != std::string::npos){
+        output[0] = s.substr(0,pos_redirection);
+        output[1] = s.substr(pos_redirection2 ==
+        pos_redirection + 1?pos_redirection + 2:pos_redirection + 1);
     }
-    if(output.find('>') != std::string::npos){
-        output = output.substr(0,output.find('>'));
+    if(s.find('|') != std::string::npos){
+        output[0] = s.substr(0,pos_pipe);
+        output[1] = s.substr(pos_pipe_end == pos_pipe + 1?pos_pipe + 2:pos_pipe + 1);
     }
-    return output;
+    return;
 }
 
 int _parseCommandLine(const char *cmd_line, char **args) {
@@ -145,12 +155,17 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
     string firstWord;
     iss >> firstWord;
 
-    firstWord = symbols_cleanup(firstWord);
-   // _removeBackgroundSignForString(firstWord);
+    string firstWord_cleanup[2];
+    symbols_cleanup(firstWord,firstWord_cleanup);
+    firstWord = firstWord_cleanup[0];
 
-    string restOfLine;
+    string restOfLine = firstWord_cleanup[1];
     getline(iss, restOfLine);
-    restOfLine = _trim(restOfLine);
+    restOfLine += _trim(restOfLine);
+
+    if(restOfLine.empty()){
+        _removeBackgroundSignForString(firstWord);
+    }
 
     if (find_alias(firstWord)) {
         firstWord = get_alias(firstWord);
@@ -229,15 +244,10 @@ SmallShell::SmallShell() : chprompt("smash"), last_dir(""), current_pid_fg(-1) {
 }
 
 Command *SmallShell::CommandByFirstWord(const char *cmd_line){
-    string cmd_s = _trim(string(cmd_line));
+    string cmd_s = alias_preparse_Cmd(_trim(string(cmd_line)).c_str());
     _removeBackgroundSignForString(cmd_s);
     string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
-//    char* args[20];
-//    int arg_num = _parseCommandLine(cmd_line,args);
 
-//    if(firstWord != cmd_s){
-//        _removeBackgroundSignForString(firstWord);
-//    }
     if (firstWord.compare("chprompt") == 0) {
         return new Chprompt(cmd_line);
         std::cout <<"CommandByFirstWord"<< cmd_line << std::endl;
@@ -296,16 +306,16 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
-    string cmd_s = _trim(string(alias_preparse_Cmd(cmd_line)));
+    string cmd_s = _trim(string(cmd_line));
 
     size_t first_gt = cmd_s.find('>');
     size_t second_gt = cmd_s.find('>', first_gt + 1);
     bool is_valid_redirection = (first_gt != string::npos && second_gt == string::npos)
                                 || (second_gt == first_gt + 1 && cmd_s.find('>', second_gt + 1) == string::npos);
 
-    string* command = new string(_trim(cmd_s.substr(0,first_gt)));
 
     if(is_valid_redirection){
+        string* command = new string(_trim(cmd_s.substr(0,first_gt)));
         return new RedirectionCommand(cmd_line,CommandByFirstWord(command->c_str()));
     }else if(contains(cmd_s,"|")){
         int pos = cmd_s.find("|");
