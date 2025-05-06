@@ -415,7 +415,7 @@ void ChangeDirCommand::execute() {
             }
             return;
         }
-        *plastPwd = std::string(cwd);
+        //*plastPwd = std::string(cwd);
         for (int i = 0; i < num_of_args; i++) {
             free(args[i]);
         }
