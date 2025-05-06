@@ -161,7 +161,7 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
 
     string restOfLine = firstWord_cleanup[1];
     getline(iss, restOfLine);
-    restOfLine += _trim(restOfLine);
+    restOfLine = _trim(restOfLine);
 
     if(restOfLine.empty()){
         _removeBackgroundSignForString(firstWord);
@@ -499,8 +499,10 @@ ForegroundCommand::ForegroundCommand(const char *cmd_line, JobsList *jobs)
         : BuiltInCommand(cmd_line),jobs(jobs) {}
 
 void ForegroundCommand::execute() {
+    string line = string(cmd_line);
+    _removeBackgroundSignForString(line);
     char* args[20];
-    int arg_num = _parseCommandLine(cmd_line,args);
+    int arg_num = _parseCommandLine(line.c_str(),args);
     JobsList::JobEntry* job;
 
     if(arg_num == 1 && jobs->isJobsListEmpty()) {
@@ -510,18 +512,19 @@ void ForegroundCommand::execute() {
         job = jobs->getLastJob(jobs->get_max_job_id());
     }
 
+    if(arg_num >= 2) {
+        if(arg_num > 2 || !isNumber(args[1])){
+            std::cerr << "smash error: fg: invalid arguments" << std::endl;
+            return;
+        }
+        char* end;
+        long val = strtol(args[1], &end, 10);
 
-    if(arg_num > 2 || (!isNumber(args[1]) && arg_num == 2)){
-        std::cerr << "smash error: fg: invalid arguments" << std::endl;
-        return;
-    }
-    char* end;
-    long val = strtol(args[1], &end, 10);
-
-    job = jobs->getJobById(val);
-    if(jobs->getJobById(val) == nullptr){
-        std::cerr << "smash error: fg: job-id " <<val <<" does not exist" << std::endl;
-        return;
+        job = jobs->getJobById(val);
+        if(jobs->getJobById(val) == nullptr){
+            std::cerr << "smash error: fg: job-id " <<val <<" does not exist" << std::endl;
+            return;
+        }
     }
     pid_t pid = job->getPid();
     SmallShell::getInstance().set_current_pid_fg(pid);
@@ -618,14 +621,6 @@ void KillCommand::execute() {
     int job_id = stoi(args[2]);
     int signal_number = stoi(args[1]);
 
-    if (signal_number > -1 || signal_number < -31 || job_id < 0) {
-        std::cout << "smash error: kill: invalid arguments" << std::endl;
-        for (int i = 0; i < num_of_args; i++) {
-            free(args[i]);
-        }
-        return;
-    }
-
     //check if job id exists
     JobsList::JobEntry *job = jobs->getJobById(job_id);
     if (job == NULL) {
@@ -637,6 +632,13 @@ void KillCommand::execute() {
     }
 
     cout << "signal number " << signal_number << " was sent to pid " << job->getPid() << endl;
+    // if (signal_number > -1 || signal_number < -31 || job_id < 0) {
+    //     std::cout << "smash error: kill: invalid arguments" << std::endl;
+    //     for (int i = 0; i < num_of_args; i++) {
+    //         free(args[i]);
+    //     }
+    //     return;
+    // }
         if (syscall(SYS_kill, job->getPid(), abs(signal_number)) == -1) {
                     perror("smash error: kill failed");
                     for (int i = 0; i < num_of_args; i++) {
@@ -647,7 +649,6 @@ void KillCommand::execute() {
 
             if (abs(signal_number) == SIGKILL) {
                 jobs->removeJobById(job_id);
-                jobs->setMaxJobId(jobs->findNewMaxJobId());
             }
 
             for (int i = 0; i < num_of_args; i++) {
@@ -723,26 +724,30 @@ UnAliasCommand::UnAliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line) 
 
 
 void UnAliasCommand::execute() {
-char *args[20];
-int arg_num = _parseCommandLine(cmd_line, args);
-if (arg_num < 2){
-    std::cerr << "smash error: unalias: not enough arguments" << std::endl;
-}
-for (int i = 1; i < arg_num; ++i) {
-    if(SmallShell::getInstance().find_alias(args[i])){
-        SmallShell::getInstance().remove_alias(args[i]);
-    }else{
-        std::cerr << "smash error: unalias: " << args[i] << " alias does not exist"
-        << std::endl;
-        return;
+    string line = string(cmd_line);
+    _removeBackgroundSignForString(line);
+    line = _trim(line);
+    char *args[20];
+    int arg_num = _parseCommandLine(line.c_str(), args);
+    if (arg_num < 2){
+        std::cerr << "smash error: unalias: not enough arguments" << std::endl;
     }
-}
+    for (int i = 1; i < arg_num; ++i) {
+        if(SmallShell::getInstance().find_alias(args[i])){
+            SmallShell::getInstance().remove_alias(args[i]);
+        }else{
+            std::cerr << "smash error: unalias: " << args[i] << " alias does not exist"
+            << std::endl;
+            return;
+        }
+    }
 }
 
 void SmallShell::remove_alias(std::string alias) {
     for (auto it = this->alias.begin(); it != this->alias.end(); ++it) {
         if (it->first == alias){
             this->alias.erase(it);
+            return;
         }
     }
 }
@@ -962,12 +967,11 @@ JobsList& SmallShell::getJobs() {
 
 ExternalCommand::ExternalCommand(const char *cmd_line): Command(cmd_line){}
 void ExternalCommand:: execute() {
-    std::string cmd_string = string(cmd_line);
+    std::string cmd_string = SmallShell::getInstance().alias_preparse_Cmd(cmd_line);
     cmd_string = _trim(cmd_string);
+    background = _isBackgroundComamnd(cmd_string.c_str());
+    complex = _isComplexCommand(cmd_string.c_str());
     _removeBackgroundSignForString(cmd_string);
-    background = _isBackgroundComamnd(cmd_line);
-    complex = _isComplexCommand(cmd_line);
-    cmd_string = SmallShell::getInstance().alias_preparse_Cmd(cmd_string.c_str());
     bool reserved = SmallShell::getInstance().isBuiltInCommand(cmd_string.c_str());
 
     char* args[COMMAND_MAX_ARGS];
@@ -1151,6 +1155,7 @@ void JobsList::removeJobById(int jobId) {
             return;
         }
     }
+    setMaxJobId(findNewMaxJobId());
 }
 
 JobsList::JobEntry *JobsList::getLastJob(int lastJobId) {
@@ -1183,6 +1188,7 @@ void JobsList::killAllJobs() {
             jobs.erase(it);
         }
     }
+    setMaxJobId(0);
 }
 
 JobsList::JobsList(): max_job_id(0) {}
