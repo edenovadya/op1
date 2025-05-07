@@ -16,10 +16,6 @@ public:
     Command(const char *cmd_line);
     virtual void execute() = 0;
 
-    int how_many_words_in_line() const;
-
-    std::string get_word_in_place(int index) const;
-
     const char* getCmdLine() const;
     //virtual void prepare();
     //virtual void cleanup();
