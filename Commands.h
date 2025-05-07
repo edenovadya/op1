@@ -2,10 +2,10 @@
 #ifndef SMASH_COMMAND_H_
 #define SMASH_COMMAND_H_
 #include <vector>
-#include <string>
 #include <list>
 #include <unordered_map>
 #include <netinet/in.h>
+#include <string>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
