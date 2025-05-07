@@ -216,7 +216,7 @@ bool containsTwoArrow(const std::string &s) {
 }
 
 bool isNumberWithDash(const std::string &s) {
-    if (s.empty()) {
+    if (s.empty() || s.length() == 1) {
         return false;
     }
     for (int i = 1; i < s.length(); i++) {
