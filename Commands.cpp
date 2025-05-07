@@ -610,7 +610,7 @@ void KillCommand::execute() {
     int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
 
     if (num_of_args != 3) {
-        std::cout << "smash error: kill: invalid arguments" << std::endl;
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
         for (int i = 0; i < num_of_args; i++) {
             free(args[i]);
         }
@@ -618,7 +618,7 @@ void KillCommand::execute() {
     }
 
     if (!isNumber(args[2]) || !isNumberWithDash(args[1])) {
-        std::cout << "smash error: kill: invalid arguments" << std::endl;
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
         for (int i = 0; i < num_of_args; i++) {
             free(args[i]);
         }
@@ -632,7 +632,7 @@ void KillCommand::execute() {
     //check if job id exists
     JobsList::JobEntry *job = jobs->getJobById(job_id);
     if (job == NULL) {
-        std::cout << "smash error: kill: job-id " << job_id << " does not exist" << std::endl;
+        std::cerr << "smash error: kill: job-id " << job_id << " does not exist" << std::endl;
         for (int i = 0; i < num_of_args; i++) {
             free(args[i]);
         }
@@ -840,25 +840,57 @@ void UnSetEnvCommand::execute()  {
 //todo:WatchProcCommand
 WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <string>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <cerrno>
+#include <cstring>
+
 bool doesProcessExist(int pid) {
     char procPath[64];
     snprintf(procPath, sizeof(procPath), "/proc/%d", pid);
-    return access(procPath, F_OK) == 0;
+    if (syscall(SYS_access, procPath, F_OK) == -1) {
+        if (errno != ENOENT) {
+            perror("smash error: access failed");
+        }
+        return false;
+    }
+    return true;
 }
 
 double memoryUsageMB(int pid) {
     std::string path = "/proc/" + std::to_string(pid) + "/status";
-    std::ifstream file(path);
-    if (!file.is_open()) {
+    int fd = syscall(SYS_open, path.c_str(), O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
         return 0.0;
     }
 
+    constexpr size_t BUF_SIZE = 8192;
+    char buffer[BUF_SIZE];
+    ssize_t bytesRead = syscall(SYS_read, fd, buffer, BUF_SIZE - 1);
+    if (bytesRead == -1) {
+        perror("smash error: read failed");
+        syscall(SYS_close, fd);
+        return 0.0;
+    }
+    buffer[bytesRead] = '\0';
+
+    syscall(SYS_close, fd);
+
+    std::istringstream iss(buffer);
     std::string line;
-    while (std::getline(file, line)) {
-        if (line.rfind("VmRSS:", 0) == 0) {  // line starts with "VmRSS:"
-            std::istringstream iss(line.substr(6));  // skip "VmRSS:"
+    while (std::getline(iss, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            std::istringstream valStream(line.substr(6));
             double kb = 0.0;
-            iss >> kb;
+            valStream >> kb;
             return kb / 1024.0;
         }
     }
@@ -867,17 +899,29 @@ double memoryUsageMB(int pid) {
 }
 
 long long CPUtime() {
-    std::ifstream file("/proc/stat");
-    if (!file.is_open()) {
+    int fd = syscall(SYS_open, "/proc/stat", O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
         return 0;
     }
 
+    char buffer[4096];
+    ssize_t bytesRead = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
+    if (bytesRead == -1) {
+        perror("smash error: read failed");
+        syscall(SYS_close, fd);
+        return 0;
+    }
+    buffer[bytesRead] = '\0';
+    syscall(SYS_close, fd);
+
+    std::istringstream iss(buffer);
     std::string line;
-    while (std::getline(file, line)) {
+    while (std::getline(iss, line)) {
         if (line.rfind("cpu ", 0) == 0) {
-            std::istringstream iss(line.substr(4));  // skip "cpu "
+            std::istringstream stats(line.substr(4));
             long long user, nice, system, idle, iowait, irq, softirq, steal;
-            if (!(iss >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal)) {
+            if (!(stats >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal)) {
                 return 0;
             }
             return user + nice + system + idle + iowait + irq + softirq + steal;
@@ -889,15 +933,23 @@ long long CPUtime() {
 
 long long processCPUtime(pid_t pid) {
     std::string path = "/proc/" + std::to_string(pid) + "/stat";
-    std::ifstream file(path);
-    if (!file.is_open()) {
+    int fd = syscall(SYS_open, path.c_str(), O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
         return 0;
     }
 
-    std::string content;
-    std::getline(file, content);
-    std::istringstream iss(content);
+    char buffer[4096];
+    ssize_t bytesRead = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
+    if (bytesRead == -1) {
+        perror("smash error: read failed");
+        syscall(SYS_close, fd);
+        return 0;
+    }
+    buffer[bytesRead] = '\0';
+    syscall(SYS_close, fd);
 
+    std::istringstream iss(buffer);
     std::string token;
     int index = 0;
     long long utime = 0, stime = 0;
@@ -913,7 +965,6 @@ long long processCPUtime(pid_t pid) {
 
     return utime + stime;
 }
-
 
 double calculateCPUUsagePercent(int pid) {
     long long totalStart = CPUtime();
