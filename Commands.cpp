@@ -840,17 +840,8 @@ void UnSetEnvCommand::execute()  {
 //todo:WatchProcCommand
 WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
-#include <iostream>
-#include <fstream>
 #include <sstream>
-#include <iomanip>
-#include <string>
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <fcntl.h>
 #include <cerrno>
-#include <cstring>
 
 bool doesProcessExist(int pid) {
     char procPath[64];
