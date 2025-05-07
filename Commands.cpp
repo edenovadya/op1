@@ -342,6 +342,9 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 }
 
 void SmallShell::executeCommand(const char *cmd_line) {
+     if(string(cmd_line).empty()){
+         return;
+     }
      Command* cmd = CreateCommand(cmd_line);
      cmd->execute();
      //delete cmd;
