@@ -2,6 +2,7 @@
 #ifndef SMASH_COMMAND_H_
 #define SMASH_COMMAND_H_
 #include <vector>
+#include <string>
 #include <list>
 #include <unordered_map>
 #include <netinet/in.h>
