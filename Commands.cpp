@@ -1489,10 +1489,12 @@ void NetInfo::printDNSServers() {
 
 //todo: RedirectionCommand
 RedirectionCommand::RedirectionCommand(const char *cmd_line, Command *command) : Command(cmd_line), command(command) {
+
     isOverride = !contains(cmd_line,">>");
     string cmdl = string(cmd_line);
+    _removeBackgroundSignForString(cmdl);
     size_t pos = cmdl.find('>');
-    file = _trim(cmdl.substr(isOverride?pos+1:pos+2));
+    file = _trim( cmdl.substr(isOverride?pos+1:pos+2));
 }
 
 
@@ -1551,6 +1553,7 @@ void PipeCommand::execute() {
         perror("smash error: pipe failed");
         return;
     }
+    int pipe_output = containsCerrPipe?2:1;
 
     pid_t pid1 = syscall(SYS_fork);
     if (pid1 < 0) {
@@ -1569,7 +1572,7 @@ void PipeCommand::execute() {
             syscall(SYS_exit, 0);
         }
 
-        if (syscall(SYS_dup2, fd[1], 1) == -1) {
+        if (syscall(SYS_dup2, fd[1], pipe_output) == -1) {
             perror("smash error: dup2 failed");
             syscall(SYS_exit, 0);
         }
