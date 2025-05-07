@@ -321,9 +321,13 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
         int pos = cmd_s.find("|");
         bool isCerr = contains(cmd_s,"|&");
 
-        string* first_command = new string(_trim(cmd_s.substr(0,pos)));
-        string* second_command = new string(_trim(cmd_s.substr
-                (isCerr?pos+2:pos+1)));
+        string temp = cmd_s.substr(0,pos);
+        _removeBackgroundSignForString(temp);
+        string* first_command = new string(_trim(temp));
+
+        temp = cmd_s.substr(isCerr?pos+2:pos+1);
+        _removeBackgroundSignForString(temp);
+        string* second_command = new string(_trim(temp));
 
         Command* first = CommandByFirstWord(first_command->c_str());
         Command* second = CommandByFirstWord(second_command->c_str());
