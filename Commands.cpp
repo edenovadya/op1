@@ -252,7 +252,6 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 
     if (firstWord.compare("chprompt") == 0) {
         return new Chprompt(cmd_line);
-        std::cout <<"CommandByFirstWord"<< cmd_line << std::endl;
 
     }else if (firstWord.compare("showpid") == 0) {
         return new ShowPidCommand(cmd_line);
@@ -841,29 +840,25 @@ void UnSetEnvCommand::execute()  {
 //todo:WatchProcCommand
 WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
 
-bool is_pid(int pid) {
-    std::string procPath = "/proc/" + std::to_string(pid);
-    return (access(procPath.c_str(), F_OK) == 0);
+bool doesProcessExist(int pid) {
+    char procPath[64];
+    snprintf(procPath, sizeof(procPath), "/proc/%d", pid);
+    return access(procPath, F_OK) == 0;
 }
 
-double get_memory_usage_ffor_command(int pid) {
-    std::string statusPath = "/proc/" + std::to_string(pid) + "/status";
-    int fd = open(statusPath.c_str(), O_RDONLY);
-    if (fd == -1) return 0.0;
+double memoryUsageMB(int pid) {
+    std::string path = "/proc/" + std::to_string(pid) + "/status";
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return 0.0;
+    }
 
-    char buffer[BUFFER_SIZE];
-    ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
-    close(fd);
-    if (n <= 0) return 0.0;
-
-    buffer[n] = '\0';
-    std::istringstream iss(buffer);
     std::string line;
-    while (std::getline(iss, line)) {
-        if (line.rfind("VmRSS:", 0) == 0) {
-            std::istringstream lineStream(line.substr(6));
-            double kb;
-            lineStream >> kb;
+    while (std::getline(file, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {  // line starts with "VmRSS:"
+            std::istringstream iss(line.substr(6));  // skip "VmRSS:"
+            double kb = 0.0;
+            iss >> kb;
             return kb / 1024.0;
         }
     }
@@ -871,231 +866,109 @@ double get_memory_usage_ffor_command(int pid) {
     return 0.0;
 }
 
-long long getCPUtime() {
+long long CPUtime() {
     std::ifstream file("/proc/stat");
-    if (!file) return 0;
+    if (!file.is_open()) {
+        return 0;
+    }
 
     std::string line;
-    std::getline(file, line);
-    if (line.rfind("cpu ", 0) != 0) return 0;
-
-    std::istringstream iss(line.substr(4));
-    long long sum = 0, val;
-    for (int i = 0; i < 8 && iss >> val; ++i) {
-        sum += val;
+    while (std::getline(file, line)) {
+        if (line.rfind("cpu ", 0) == 0) {
+            std::istringstream iss(line.substr(4));  // skip "cpu "
+            long long user, nice, system, idle, iowait, irq, softirq, steal;
+            if (!(iss >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal)) {
+                return 0;
+            }
+            return user + nice + system + idle + iowait + irq + softirq + steal;
+        }
     }
-    return sum;
+
+    return 0;
 }
 
-long long get_process_time(pid_t pid) {
-    std::string statPath = "/proc/" + std::to_string(pid) + "/stat";
-    std::ifstream file(statPath);
-    if (!file) return 0;
+long long processCPUtime(pid_t pid) {
+    std::string path = "/proc/" + std::to_string(pid) + "/stat";
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return 0;
+    }
+
+    std::string content;
+    std::getline(file, content);
+    std::istringstream iss(content);
 
     std::string token;
+    int index = 0;
     long long utime = 0, stime = 0;
-    for (int i = 1; file >> token; ++i) {
-        if (i == 14) utime = std::stoll(token);
-        else if (i == 15) {
+
+    while (iss >> token) {
+        ++index;
+        if (index == 14) utime = std::stoll(token);
+        else if (index == 15) {
             stime = std::stoll(token);
             break;
         }
     }
+
     return utime + stime;
 }
 
-double getCPUusage(int pid) {
-    long long total_before = getCPUtime();
-    long long proc_before = get_process_time(pid);
+
+double calculateCPUUsagePercent(int pid) {
+    long long totalStart = CPUtime();
+    long long procStart = processCPUtime(pid);
+
     sleep(1);
-    long long total_after = getCPUtime();
-    long long proc_after = get_process_time(pid);
 
-    long long total_delta = total_after - total_before;
-    long long proc_delta = proc_after - proc_before;
+    long long totalEnd = CPUtime();
+    long long procEnd = processCPUtime(pid);
 
-    return (total_delta > 0) ? (100.0 * proc_delta / total_delta) : 0.0;
+    long long totalDiff = totalEnd - totalStart;
+    long long procDiff = procEnd - procStart;
+
+    if (totalDiff <= 0) return 0.0;
+
+    return (100.0 * procDiff) / totalDiff;
 }
 
-int Command::how_many_words_in_line() const {
-    std::istringstream iss(cmd_line);
-    return std::distance(std::istream_iterator<std::string>(iss), std::istream_iterator<std::string>());
-}
-
-std::string Command::get_word_in_place(int index) const {
-    std::istringstream iss(cmd_line);
-    std::string word;
-    int i = 0;
-    while (iss >> word) {
-        if (i++ == index) return word;
-    }
-    throw std::out_of_range("Index out of range in get_word_in_place");
-}
 
 void WatchProcCommand::execute() {
     try {
-        if (how_many_words_in_line() != 2) {
+        std::string cmd_string(cmd_line);
+        if (_isBackgroundComamndForString(cmd_string)) {
+            _removeBackgroundSignForString(cmd_string);
+        }
+        cmd_string = _trim(cmd_string);
+
+        char* args[COMMAND_MAX_ARGS];
+        int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
+
+        if (num_of_args != 2 || !isNumber(string(args[1]))) {
             std::cerr << "smash error: watchproc: invalid arguments" << std::endl;
+            for (int i = 0; i < num_of_args; ++i) free(args[i]);
             return;
         }
 
-        std::string pidStr = get_word_in_place(1);
-        if (!isNumber(pidStr)) {
-            std::cerr << "smash error: watchproc: invalid arguments" << std::endl;
+        int targetPid = std::stoi(args[1]);
+
+        if (!doesProcessExist(targetPid)) {
+            std::cerr << "smash error: watchproc: pid " << targetPid << " does not exist" << std::endl;
             return;
         }
 
-        int pid = std::stoi(pidStr);
-        if (!is_pid(pid)) {
-            std::cerr << "smash error: watchproc: pid " << pid << " does not exist" << std::endl;
-            return;
-        }
-
-        double memMB = get_memory_usage_ffor_command(pid);
-        double cpuPercent = getCPUusage(pid);
+        double memoryMB = memoryUsageMB(targetPid);
+        double cpuPercent = calculateCPUUsagePercent(targetPid);
 
         std::cout << std::fixed << std::setprecision(1)
-                  << "PID: " << pid
+                  << "PID: " << targetPid
                   << " | CPU Usage: " << cpuPercent << "%"
-                  << " | Memory Usage: " << memMB << " MB"
-                  << std::endl;
+                  << " | Memory Usage: " << memoryMB << " MB" << std::endl;
 
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         std::cerr << "smash error: watchproc: invalid arguments" << std::endl;
     }
 }
-
-
-
-// void WatchProcCommand::execute() {
-//     char* args[COMMAND_MAX_ARGS];
-//     string line = _trim(cmd_line);
-//     _removeBackgroundSignForString(line);
-//     int num_of_args = _parseCommandLine(line.c_str(), args);
-//     if (num_of_args != 2 || !isNumber(args[1])) {
-//         write(STDERR_FILENO, "smash error: watchproc: invalid arguments\n", 42);
-//         for (int i = 0; i < num_of_args; i++) free(args[i]);
-//         return;
-//     }
-//
-//     pid_t pid = atoi(args[1]);
-//     char buf[512];
-//
-//     if (syscall(SYS_kill, pid, 0) == -1) {
-//         if (errno == ESRCH) {
-//             int len = snprintf(buf, sizeof(buf), "smash error: watchproc: pid %d does not exist\n", pid);
-//             write(STDERR_FILENO, buf, len);
-//         } else {
-//             perror("smash error: kill failed");
-//         }
-//         for (int i = 0; i < num_of_args; i++) free(args[i]);
-//         return;
-//     }
-//
-//     long clk_ticks = sysconf(_SC_CLK_TCK);
-//     if (clk_ticks == -1) {
-//         perror("smash error: sysconf failed");
-//         for (int i = 0; i < num_of_args; i++) free(args[i]);
-//         return;
-//     }
-//
-//     // Get initial process and system times
-//     long t0_proc_time, t0_total_time;
-//     if (!getProcessCPUTime(pid, &t0_proc_time) || !getTotalCPUTime(&t0_total_time)) {
-//         for (int i = 0; i < num_of_args; i++) free(args[i]);
-//         return;
-//     }
-//
-//     sleep(1); // delta time window
-//
-//     // Get updated process and system times
-//     long t1_proc_time, t1_total_time;
-//     if (!getProcessCPUTime(pid, &t1_proc_time) || !getTotalCPUTime(&t1_total_time)) {
-//         for (int i = 0; i < num_of_args; i++) free(args[i]);
-//         return;
-//     }
-//
-//     double delta_proc = t1_proc_time - t0_proc_time;
-//     double delta_total = t1_total_time - t0_total_time;
-//     double cpu_usage = (delta_proc / delta_total) * 100.0;
-//
-//     double memory_mb = getMemoryUsageMB(pid);
-//
-//     int len = snprintf(buf, sizeof(buf),
-//         "PID: %d | CPU Usage: %.1f%% | Memory Usage: %.1f MB\n",
-//         pid, cpu_usage, memory_mb);
-//     write(STDOUT_FILENO, buf, len);
-//
-//     for (int i = 0; i < num_of_args; i++) free(args[i]);
-// }
-//
-// bool WatchProcCommand::getProcessCPUTime(pid_t pid, long* total_time) {
-//     char path[64];
-//     snprintf(path, sizeof(path), "/proc/%d/stat", pid);
-//     int fd = syscall(SYS_open, path, O_RDONLY);
-//     if (fd == -1) return false;
-//
-//     char buffer[1024];
-//     ssize_t bytes = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
-//     syscall(SYS_close, fd);
-//     if (bytes <= 0) return false;
-//     buffer[bytes] = '\0';
-//
-//     // parse fields 14 and 15 (utime and stime)
-//     char* token = buffer;
-//     for (int i = 0; i < 13; ++i) token = strchr(token, ' ') + 1;
-//     long utime = atol(token);
-//     token = strchr(token, ' ') + 1;
-//     long stime = atol(token);
-//
-//     *total_time = utime + stime;
-//     return true;
-// }
-//
-// bool WatchProcCommand::getTotalCPUTime(long* total_time) {
-//     int fd = syscall(SYS_open, "/proc/stat", O_RDONLY);
-//     if (fd == -1) return false;
-//
-//     char buffer[1024];
-//     ssize_t bytes = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
-//     syscall(SYS_close, fd);
-//     if (bytes <= 0) return false;
-//     buffer[bytes] = '\0';
-//
-//     if (strncmp(buffer, "cpu ", 4) != 0) return false;
-//
-//     long user, nice, system, idle, iowait, irq, softirq, steal;
-//     sscanf(buffer + 4, "%ld %ld %ld %ld %ld %ld %ld %ld",
-//         &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal);
-//     *total_time = user + nice + system + idle + iowait + irq + softirq + steal;
-//     return true;
-// }
-//
-// double WatchProcCommand::getMemoryUsageMB(pid_t pid) {
-//     char path[64], buffer[1024];
-//     snprintf(path, sizeof(path), "/proc/%d/status", pid);
-//     int fd = syscall(SYS_open, path, O_RDONLY);
-//     if (fd == -1) return 0;
-//
-//     ssize_t bytes = syscall(SYS_read, fd, buffer, sizeof(buffer) - 1);
-//     syscall(SYS_close, fd);
-//     if (bytes <= 0) return 0;
-//     buffer[bytes] = '\0';
-//
-//     char* line = buffer;
-//     while (line && *line) {
-//         if (strncmp(line, "VmRSS:", 6) == 0) {
-//             long kb;
-//             sscanf(line + 6, "%ld", &kb);
-//             return kb / 1024.0;
-//         }
-//         line = strchr(line, '\n');
-//         if (line) line++;
-//     }
-//     return 0;
-// }
-
-
 
 //todo: external command
 JobsList& SmallShell::getJobs() {
@@ -1175,7 +1048,6 @@ void ExternalCommand:: execute() {
     }
 
     else if (complex && !background) {
-        std::cout<<cmd_string<<std::endl;
         if (pid == 0) { // child
             if (setpgrp() == -1) {
                 perror("smash error: setpgrp failed");
