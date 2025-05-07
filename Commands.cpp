@@ -838,7 +838,9 @@ WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_li
 
 void WatchProcCommand::execute() {
     char* args[COMMAND_MAX_ARGS];
-    int num_of_args = _parseCommandLine(cmd_line, args);
+    string line = _trim(cmd_line);
+    _removeBackgroundSignForString(line);
+    int num_of_args = _parseCommandLine(line.c_str(), args);
     if (num_of_args != 2 || !isNumber(args[1])) {
         write(STDERR_FILENO, "smash error: watchproc: invalid arguments\n", 42);
         for (int i = 0; i < num_of_args; i++) free(args[i]);
@@ -1222,6 +1224,7 @@ void SmallShell::print_alias() const {
 //todo: du command
 DiskUsageCommand::DiskUsageCommand(const char *cmd_line) : Command(cmd_line) {}
 
+
 void DiskUsageCommand::execute() {
     std::string path = ".";
 
@@ -1312,9 +1315,9 @@ size_t DiskUsageCommand::getDirectorySize(const std::string& path) {
 }
 
 
+
 //todo: netinfo command
 NetInfo::NetInfo(const char *cmd_line) : Command(cmd_line) {}
-
 void NetInfo::printStr(const char* str) {
     syscall(SYS_write, STDOUT_FILENO, str, strlen(str));
 }
@@ -1330,9 +1333,9 @@ void NetInfo::printIP(const char* label, struct in_addr addr) {
     syscall(SYS_write, STDOUT_FILENO, "\n", 1);
 }
 
-// ========== MAIN EXECUTION ==========
 void NetInfo::execute() {
     std::string cmd = _trim(std::string(cmd_line));
+    _removeBackgroundSignForString(cmd);
     char* args[COMMAND_MAX_ARGS];
     int argc = _parseCommandLine(cmd.c_str(), args);
 
@@ -1359,7 +1362,7 @@ void NetInfo::execute() {
         return;
     }
 
-    if (pid == 0) {  // Child
+    if (pid == 0) {
         if (syscall(SYS_setpgid, 0, 0) == -1) {
             perror("smash error: setpgrp failed");
             syscall(SYS_exit, 1);
@@ -1371,7 +1374,6 @@ void NetInfo::execute() {
     }
 }
 
-// ========== runNetInfoInternal ==========
 void NetInfo::runNetInfoInternal(const char* iface) {
     int sock = syscall(SYS_socket, AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
@@ -1381,8 +1383,10 @@ void NetInfo::runNetInfoInternal(const char* iface) {
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, iface, IFNAMSIZ);
+    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);  // זהירות: להבטיח null-termination
+    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
 
+    // Check if interface exists via SIOCGIFADDR
     if (syscall(SYS_ioctl, sock, SIOCGIFADDR, &ifr) < 0) {
         printStr("smash error: netinfo: interface ");
         printStr(iface);
@@ -1391,11 +1395,13 @@ void NetInfo::runNetInfoInternal(const char* iface) {
         return;
     }
 
+    // IP address
     struct sockaddr_in* ipaddr = (struct sockaddr_in*)&ifr.ifr_addr;
     printIP("IP Address: ", ipaddr->sin_addr);
 
+    // Subnet mask
     if (syscall(SYS_ioctl, sock, SIOCGIFNETMASK, &ifr) < 0) {
-        perror("smash error: ioctl (SIOCGIFNETMASK) failed");
+        printStrLn("Subnet Mask: ");
     } else {
         struct sockaddr_in* netmask = (struct sockaddr_in*)&ifr.ifr_netmask;
         printIP("Subnet Mask: ", netmask->sin_addr);
@@ -1407,11 +1413,12 @@ void NetInfo::runNetInfoInternal(const char* iface) {
     syscall(SYS_close, sock);
 }
 
-// ========== getDefaultGateway ==========
+
 void NetInfo::getDefaultGateway(const char* iface) {
     int fd = syscall(SYS_open, "/proc/net/route", O_RDONLY);
     if (fd < 0) {
         perror("smash error: open failed");
+        printStrLn("Default Gateway: ");
         return;
     }
 
@@ -1420,10 +1427,10 @@ void NetInfo::getDefaultGateway(const char* iface) {
     if (n <= 0) {
         perror("smash error: read failed");
         syscall(SYS_close, fd);
+        printStrLn("Default Gateway: ");
         return;
     }
     syscall(SYS_close, fd);
-
     buf[n] = '\0';
 
     char* line = strtok(buf, "\n");
@@ -1446,14 +1453,14 @@ void NetInfo::getDefaultGateway(const char* iface) {
         line = strtok(nullptr, "\n");
     }
 
-    printStrLn("Default Gateway: Unavailable");
+    printStrLn("Default Gateway: ");
 }
 
-// ========== printDNSServers ==========
 void NetInfo::printDNSServers() {
     int fd = syscall(SYS_open, "/etc/resolv.conf", O_RDONLY);
     if (fd < 0) {
         perror("smash error: open failed");
+        printStrLn("DNS Servers: ");
         return;
     }
 
@@ -1462,34 +1469,32 @@ void NetInfo::printDNSServers() {
     if (n <= 0) {
         perror("smash error: read failed");
         syscall(SYS_close, fd);
+        printStrLn("DNS Servers: ");
         return;
     }
     syscall(SYS_close, fd);
-
     buf[n] = '\0';
+
     char* line = strtok(buf, "\n");
 
-    bool first = true;
+    bool printedAny = false;
+    printStr("DNS Servers: ");
     while (line) {
         if (strncmp(line, "nameserver", 10) == 0) {
             char tag[16], ip[64];
-            sscanf(line, "%s %s", tag, ip);
-            if (first) {
-                printStr("DNS Servers: ");
-                first = false;
-            } else {
-                printStr(", ");
+            if (sscanf(line, "%s %s", tag, ip) == 2) {
+                if (printedAny) {
+                    printStr(", ");
+                }
+                printStr(ip);
+                printedAny = true;
             }
-            printStr(ip);
         }
         line = strtok(nullptr, "\n");
     }
 
-    if (!first) {
-        syscall(SYS_write, STDOUT_FILENO, "\n", 1);
-    }
+    syscall(SYS_write, STDOUT_FILENO, "\n", 1);
 }
-
 
 //todo: RedirectionCommand
 RedirectionCommand::RedirectionCommand(const char *cmd_line, Command *command) : Command(cmd_line), command(command) {
