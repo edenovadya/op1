@@ -292,6 +292,7 @@ public:
     void set_alias(std::string& alias,std::string& command);
     void remove_alias(std::string alias);
     bool isBuiltInCommand(const char *cmd_line) const;
+    bool isSpecialCommand(const char *cmd_line) const;
     Command* CommandByFirstWord(const char *cmd_line);
 };
 
