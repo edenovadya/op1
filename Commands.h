@@ -64,7 +64,10 @@ private:
 size_t getDirectorySize(const std::string& path);
 public:
     DiskUsageCommand(const char *cmd_line);
-    virtual ~DiskUsageCommand() = default;
+
+size_t getDirectoryBlocks(const std::string &path);
+
+virtual ~DiskUsageCommand() = default;
     void execute() override;
     size_t runDuInternal(const std::string &cmd);
 
