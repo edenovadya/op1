@@ -309,7 +309,7 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
-    string cmd_s = _trim(string(cmd_line));
+    string cmd_s = _trim(alias_preparse_Cmd(cmd_line));
 
     string cmd_regex = cmd_s;
     _removeBackgroundSignForString(cmd_regex);
@@ -682,13 +682,15 @@ void KillCommand::execute() {
         }
 
 
-
-bool isValidCommand(const std::string& cmd) {
-    std::string checkCmd = "command -v " + cmd + " >/dev/null 2>&1";
-
-    int result = system(checkCmd.c_str());
-    return result == 0;
-}
+//
+//bool isValidCommand(const std::string& cmd) {
+//    std::string checkCmd = "command -v " + cmd + " >/dev/null 2>&1";
+//
+//    int result = system(checkCmd.c_str());
+//    return result == 0;
+//    //|| (isValidCommand(alias) &&
+//    //            arg_num != 1
+//}
 
 //todo: alias command
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
@@ -714,8 +716,8 @@ void AliasCommand::execute() {
 
     //check if reserved or exiting
     if(SmallShell::getInstance().find_alias(alias)|| SmallShell::getInstance
-            ().isBuiltInCommand(alias.c_str()) || (isValidCommand(alias) &&
-            arg_num != 1)){
+            ().isBuiltInCommand(alias.c_str()) || SmallShell::getInstance()
+            .isSpecialCommand(alias.c_str())){
         std::cerr << "smash error: alias: " <<alias<< " already exists or is a reserved command" << std::endl;
         return;
     }
@@ -1141,7 +1143,17 @@ bool SmallShell::isBuiltInCommand(const char *cmd_line) const{
     return built_in_commands.find(firstWord) != built_in_commands.end();
 }
 
-
+bool SmallShell::isSpecialCommand(const char *cmd_line) const{
+    string cmd_to_check = _trim(string(cmd_line));
+    string firstWord = cmd_to_check.substr(0, cmd_to_check.find_first_of(" \n"));
+    static const set<string> Special_commands = {"du", "whoami", "netinfo", ">", "|"};
+    for (const auto& cmd : Special_commands) {
+        if(contains(firstWord,cmd)){
+            return true;
+        }
+    }
+    return false;
+}
 
 //todo: Job
 void JobsList::printJobsList() {
