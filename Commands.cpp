@@ -4,7 +4,6 @@
 #include <net/if.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <complex>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -17,7 +16,6 @@
 #include <sys/socket.h>
 #include <linux/route.h>
 #include <fcntl.h>
-#include <fstream>
 #include <iomanip>
 #include <pwd.h>
 #include <sys/syscall.h>
@@ -83,6 +81,7 @@ void symbols_cleanup(const std::string &s,string* output) {
     }
     return;
 }
+
 
 int _parseCommandLine(const char *cmd_line, char **args) {
     FUNC_ENTRY()
@@ -303,16 +302,29 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 
 }
 
+
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
     string cmd_s = _trim(string(cmd_line));
 
+    string cmd_regex = cmd_s;
+    _removeBackgroundSignForString(cmd_regex);
+    cmd_regex = _trim(cmd_regex);
+
+    regex pattern(R"(^alias [a-zA-Z0-9_]+='[^']*'$)");
+    if (regex_match(cmd_regex, pattern)){
+        return CommandByFirstWord(cmd_line);
+    }
+
+
     size_t first_gt = cmd_s.find('>');
     size_t second_gt = cmd_s.find('>', first_gt + 1);
     bool is_valid_redirection = (first_gt != string::npos && second_gt == string::npos)
-                                || (second_gt == first_gt + 1 && cmd_s.find('>', second_gt + 1) == string::npos);
+            || (second_gt == first_gt + 1 && cmd_s.find('>', second_gt + 1) == string::npos)
+            && cmd_s.size() !=  first_gt && cmd_s.size() !=  second_gt
+            ;
 
 
     if(is_valid_redirection){
@@ -536,6 +548,7 @@ void ForegroundCommand::execute() {
     }
     pid_t pid = job->getPid();
     SmallShell::getInstance().set_current_pid_fg(pid);
+    std::cout << job->getCmd()->getCmdLine() << " " << pid << std::endl;
     if(waitpid(pid,nullptr,0) == -1) {
         perror("smash error: waitpid failed");
         return;
@@ -638,8 +651,9 @@ void KillCommand::execute() {
         }
         return;
     }
+    int signal_number_abs = abs(signal_number);
 
-    cout << "signal number " << signal_number << " was sent to pid " << job->getPid() << endl;
+    cout << "signal number " << signal_number_abs << " was sent to pid " << job->getPid() << endl;
     // if (signal_number > -1 || signal_number < -31 || job_id < 0) {
     //     std::cout << "smash error: kill: invalid arguments" << std::endl;
     //     for (int i = 0; i < num_of_args; i++) {
@@ -647,7 +661,7 @@ void KillCommand::execute() {
     //     }
     //     return;
     // }
-        if (syscall(SYS_kill, job->getPid(), abs(signal_number)) == -1) {
+        if (syscall(SYS_kill, job->getPid(), signal_number_abs) == -1) {
                     perror("smash error: kill failed");
                     for (int i = 0; i < num_of_args; i++) {
                         free(args[i]);
@@ -655,7 +669,7 @@ void KillCommand::execute() {
                     return;
                 }
 
-            if (abs(signal_number) == SIGKILL) {
+            if (signal_number_abs == SIGKILL) {
                 jobs->removeJobById(job_id);
             }
 
@@ -664,6 +678,15 @@ void KillCommand::execute() {
             }
             return;
         }
+
+
+
+bool isValidCommand(const std::string& cmd) {
+    std::string checkCmd = "command -v " + cmd + " >/dev/null 2>&1";
+
+    int result = system(checkCmd.c_str());
+    return result == 0;
+}
 
 //todo: alias command
 AliasCommand::AliasCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
@@ -685,12 +708,12 @@ void AliasCommand::execute() {
 
 
     alias = _trim(line.substr(alias_pos+5,eq_pos-(alias_pos+5)));
-    alias_value = _trim(line.substr(wrap_pos+1,wrap_pos2-(wrap_pos+1)));
+    alias_value = line.substr(wrap_pos+1,wrap_pos2-(wrap_pos+1));
 
     //check if reserved or exiting
     if(SmallShell::getInstance().find_alias(alias)|| SmallShell::getInstance
-            ().isBuiltInCommand(alias.c_str()) || (access(alias.c_str(), X_OK)
-            == 0 && arg_num != 1)){
+            ().isBuiltInCommand(alias.c_str()) || (isValidCommand(alias) &&
+            arg_num != 1)){
         std::cerr << "smash error: alias: " <<alias<< " already exists or is a reserved command" << std::endl;
         return;
     }
@@ -1203,6 +1226,7 @@ void JobsList::removeJobById(int jobId) {
     for(auto it = jobs.begin(); it != jobs.end(); it++){
         if(it->getJobId() == jobId){
             jobs.erase(it);
+            setMaxJobId(findNewMaxJobId());
             return;
         }
     }
@@ -1560,7 +1584,7 @@ void RedirectionCommand::execute() {
     }
 
     int flags = O_CREAT | O_WRONLY | (isOverride ? O_TRUNC : O_APPEND);
-    int fd = syscall(SYS_open, file.c_str(), flags, 0644);
+    int fd = syscall(SYS_open, file.c_str(), flags, 0666);
     if (fd == -1) {
         perror("smash error: open failed");
         syscall(SYS_dup2, saved_stdout, STDOUT_FILENO); // שחזור stdout
