@@ -57,16 +57,11 @@ public:
 };
 
 class DiskUsageCommand : public Command {
-private:
-size_t getDirectorySize(const std::string& path);
 public:
     DiskUsageCommand(const char *cmd_line);
-
-size_t getDirectoryBlocks(const std::string &path);
-
-virtual ~DiskUsageCommand() = default;
+    size_t calc_blocks_rec(const std::string &directory);
+    virtual ~DiskUsageCommand() = default;
     void execute() override;
-    size_t runDuInternal(const std::string &cmd);
 
 };
 
@@ -242,13 +237,16 @@ public:
 class WatchProcCommand : public BuiltInCommand {
 public:
     WatchProcCommand(const char *cmd_line);
+
+    double memoryUsageMB(int pid);
+
+    long long CPUtime();
+
+    long long processCPUtime(pid_t pid);
+
+    double calculateCPUUsagePercent(int pid);
+
     void execute() override;
-
-    bool getProcessCPUTime(pid_t pid, long *total_time);
-
-    bool getTotalCPUTime(long *total_time);
-
-    double getMemoryUsageMB(pid_t pid);
 
     virtual ~WatchProcCommand() = default;
 };
