@@ -310,7 +310,6 @@ Command *SmallShell::CommandByFirstWord(const char *cmd_line){
 */
 Command *SmallShell::CreateCommand(const char *cmd_line) {
     string cmd_s = _trim(alias_preparse_Cmd(cmd_line));
-
     string cmd_regex = cmd_s;
     _removeBackgroundSignForString(cmd_regex);
     cmd_regex = _trim(cmd_regex);
@@ -866,19 +865,8 @@ void UnSetEnvCommand::execute()  {
 
 //todo:WatchProcCommand
 WatchProcCommand::WatchProcCommand(const char *cmd_line) : BuiltInCommand(cmd_line) {}
-bool doesProcessExist(int pid) {
-    char procPath[64];
-    snprintf(procPath, sizeof(procPath), "/proc/%d", pid);
-    if (syscall(SYS_access, procPath, F_OK) == -1) {
-        if (errno != ENOENT) {
-            perror("smash error: access failed");
-        }
-        return false;
-    }
-    return true;
-}
 
-double memoryUsageMB(int pid) {
+double WatchProcCommand::memoryUsageMB(int pid) {
     std::string path = "/proc/" + std::to_string(pid) + "/status";
     int fd = syscall(SYS_open, path.c_str(), O_RDONLY);
     if (fd == -1) {
@@ -912,7 +900,7 @@ double memoryUsageMB(int pid) {
     return 0.0;
 }
 
-long long CPUtime() {
+long long WatchProcCommand::CPUtime() {
     int fd = syscall(SYS_open, "/proc/stat", O_RDONLY);
     if (fd == -1) {
         perror("smash error: open failed");
@@ -945,7 +933,7 @@ long long CPUtime() {
     return 0;
 }
 
-long long processCPUtime(pid_t pid) {
+long long WatchProcCommand::processCPUtime(pid_t pid) {
     std::string path = "/proc/" + std::to_string(pid) + "/stat";
     int fd = syscall(SYS_open, path.c_str(), O_RDONLY);
     if (fd == -1) {
@@ -980,11 +968,11 @@ long long processCPUtime(pid_t pid) {
     return utime + stime;
 }
 
-double calculateCPUUsagePercent(int pid) {
+double WatchProcCommand::calculateCPUUsagePercent(int pid) {
     long long totalStart = CPUtime();
     long long procStart = processCPUtime(pid);
 
-    sleep(1);
+    sleep(1); //as required
 
     long long totalEnd = CPUtime();
     long long procEnd = processCPUtime(pid);
@@ -997,7 +985,6 @@ double calculateCPUUsagePercent(int pid) {
     return (100.0 * procDiff) / totalDiff;
 }
 
-
 void WatchProcCommand::execute() {
     try {
         std::string cmd_string(cmd_line);
@@ -1009,7 +996,7 @@ void WatchProcCommand::execute() {
         char* args[COMMAND_MAX_ARGS];
         int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
 
-        if (num_of_args != 2 || !isNumber(string(args[1]))) {
+        if (num_of_args != 2 || !isNumber(std::string(args[1]))) {
             std::cerr << "smash error: watchproc: invalid arguments" << std::endl;
             for (int i = 0; i < num_of_args; ++i) free(args[i]);
             return;
@@ -1017,7 +1004,18 @@ void WatchProcCommand::execute() {
 
         int targetPid = std::stoi(args[1]);
 
-        if (!doesProcessExist(targetPid)) {
+        // Inline doesProcessExist logic:
+        if (targetPid <= 0) {
+            std::cerr << "smash error: watchproc: pid " << targetPid << " does not exist" << std::endl;
+            return;
+        }
+
+        char procPath[64];
+        snprintf(procPath, sizeof(procPath), "/proc/%d", targetPid);
+        if (syscall(SYS_access, procPath, F_OK) == -1) {
+            if (errno != ENOENT) {
+                perror("smash error: access failed");
+            }
             std::cerr << "smash error: watchproc: pid " << targetPid << " does not exist" << std::endl;
             return;
         }
@@ -1034,6 +1032,7 @@ void WatchProcCommand::execute() {
         std::cerr << "smash error: watchproc: invalid arguments" << std::endl;
     }
 }
+
 
 //todo: external command
 JobsList& SmallShell::getJobs() {
@@ -1303,9 +1302,7 @@ void SmallShell::print_alias() const {
 //todo: du command
 DiskUsageCommand::DiskUsageCommand(const char *cmd_line) : Command(cmd_line) {}
 
-
-///////////////////////ofek utay maya eden//////////////////////
-size_t calc_blocks_rec(const std::string& directory) {
+size_t DiskUsageCommand::calc_blocks_rec(const std::string& directory) {
     int dirFd = open(directory.c_str(), O_RDONLY | O_DIRECTORY);
     if (dirFd < 0) {
         perror("smash error: open failed");
@@ -1374,7 +1371,7 @@ void DiskUsageCommand::execute() {
 
     // Calculate total blocks recursively for all files
     size_t totalBlocks = calc_blocks_rec(targetPath);
-    size_t totalKB = std::ceil(totalBlocks);  // convert 512-byte blocks to kilobytes
+    size_t totalKB = (totalBlocks+1)/2;  // convert 512-byte blocks to kilobytes
 
     // Now, include the directory's own metadata size
     struct stat dirStat;
@@ -1386,183 +1383,6 @@ void DiskUsageCommand::execute() {
 
     std::cout << "Total disk usage: " << totalKB << " KB" << std::endl;
 }
-
-
-
-// // ///////////////////ofek itay////////////////////////////////////
-// size_t getDirectorySelfSizeKB(const std::string& path = ".") {
-//     struct stat st;
-//     if (lstat(path.c_str(), &st) != 0) {
-//         perror("smash error: lstat failed");
-//         return 0;
-//     }
-//     return (st.st_blocks * 512 + 1023) / 1024;
-// }
-//
-// size_t calculateDiskUsage(const std::string& path) {
-//     size_t total_blocks = 0;
-//
-//     int fd = open(path.c_str(), O_RDONLY | O_DIRECTORY);
-//     if (fd < 0) {
-//         perror("smash error: open failed");
-//         return 0;
-//     }
-//
-//     char buf[BUFFER_SIZE];
-//
-//     while (true) {
-//         int nread = syscall(SYS_getdents64, fd, buf, BUFFER_SIZE);
-//         if (nread == -1) {
-//             perror("smash error: getdents64 failed");
-//             close(fd);
-//             return 0;
-//         }
-//         if (nread == 0) break;
-//
-//         for (int bpos = 0; bpos < nread;) {
-//             linux_dirent64* d = (linux_dirent64*)(buf + bpos);
-//             std::string name(d->d_name);
-//             bpos += d->d_reclen;
-//
-//             if (name == "." || name == "..") continue;
-//
-//             std::string full_path = path + "/" + name;
-//             struct stat st;
-//             if (lstat(full_path.c_str(), &st) == 0) {
-//                 total_blocks += st.st_blocks;
-//                 if (S_ISDIR(st.st_mode)) {
-//                     total_blocks += calculateDiskUsage(full_path);
-//                 }
-//             }
-//         }
-//     }
-//
-//     close(fd);
-//     return total_blocks;
-// }
-//
-//
-// void DiskUsageCommand::execute() {
-//     std::string cmd_string = SmallShell::getInstance().alias_preparse_Cmd(cmd_line);
-//     cmd_string = _trim(cmd_string);
-//     _removeBackgroundSignForString(cmd_string);
-//
-//     char* args[COMMAND_MAX_ARGS];
-//     int num_of_args = _parseCommandLine(cmd_string.c_str(), args);
-//
-//     if (num_of_args > 2) {
-//         std::cerr << "smash error: du: too many arguments" << std::endl;
-//         return;
-//     }
-//
-//     std::string path = ".";
-//     if (num_of_args == 2) {
-//         path = string(args[1]);
-//     }
-//
-//     struct stat st;
-//     if (lstat(path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-//         std::cerr << "smash error: du: directory " << path << " does not exist" << std::endl;
-//         return;
-//     }
-//
-//     size_t total_blocks = calculateDiskUsage(path);
-//     size_t total_kb = (total_blocks + 1) / 2;
-//     total_kb += getDirectorySelfSizeKB(path);
-//
-//     cout << "Total disk usage: " << total_kb << " KB" << std::endl;
-// }
-
-//////////////////////////////maya and eden ols/////////////////////////////////////
-// void DiskUsageCommand::execute() {
-//     std::string path = ".";
-//
-//     if (cmd_line) {
-//         std::string trimmed = _trim(std::string(cmd_line));
-//         _removeBackgroundSignForString(trimmed);
-//         char* args[COMMAND_MAX_ARGS];
-//         int argc = _parseCommandLine(trimmed.c_str(), args);
-//         if (argc > 2) {
-//             write(STDERR_FILENO, "smash error: du: too many arguments\n", 36);
-//             return;
-//         }
-//         if (argc == 2)
-//             path = args[1];
-//     }
-//
-//     struct stat st;
-//     if (syscall(SYS_stat, path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-//         std::string msg = "smash error: du: directory " + path + " does not exist\n";
-//         write(STDERR_FILENO, msg.c_str(), msg.size());
-//         return;
-//     }
-//
-//     pid_t pid = syscall(SYS_fork);
-//     if (pid < 0) {
-//         perror("smash error: fork failed");
-//         return;
-//     }
-//
-//     if (pid == 0) {  // Child
-//         if (syscall(SYS_setpgid, 0, 0) == -1) {
-//             perror("smash error: setpgrp failed");
-//             syscall(SYS_exit, 0);
-//         }
-//
-//         size_t total = getDirectorySize(path);
-//         std::string output = "Total disk usage: " + std::to_string((total + 1023) / 1024) + " KB\n";
-//         write(STDOUT_FILENO, output.c_str(), output.size());
-//         syscall(SYS_exit, 0);
-//     } else {  // Parent
-//         syscall(SYS_wait4, pid, nullptr, 0, nullptr);
-//     }
-// }
-//
-// size_t DiskUsageCommand::getDirectorySize(const std::string& path) {
-//     size_t totalSize = 0;
-//     int fd = syscall(SYS_open, path.c_str(), O_RDONLY | O_DIRECTORY);
-//     if (fd < 0) {
-//         perror("smash error: open failed");
-//         return 0;
-//     }
-//
-//     char buf[8192];
-//     int nread;
-//
-//     while ((nread = syscall(SYS_getdents64, fd, buf, sizeof(buf))) > 0) {
-//         for (int bpos = 0; bpos < nread;) {
-//             struct linux_dirent64* d = (struct linux_dirent64*)(buf + bpos);
-//             std::string name = d->d_name;
-//             bpos += d->d_reclen;
-//
-//             if (name == "." || name == "..") continue;
-//
-//             std::string full_path = path + "/" + name;
-//             struct stat st;
-//             if (syscall(SYS_lstat, full_path.c_str(), &st) == -1) {
-//                 perror("smash error: lstat failed");
-//                 continue;
-//             }
-//
-//             if (S_ISDIR(st.st_mode)) {
-//                 totalSize += getDirectorySize(full_path);
-//             } else if (!S_ISLNK(st.st_mode)) {
-//                 totalSize += st.st_size;
-//             }
-//         }
-//     }
-//
-//     if (nread == -1) {
-//         perror("smash error: getdents64 failed");
-//     }
-//
-//     if (syscall(SYS_close, fd) == -1) {
-//         perror("smash error: close failed");
-//     }
-//
-//     return totalSize;
-// }
-
 
 
 //todo: netinfo command
@@ -1632,7 +1452,7 @@ void NetInfo::runNetInfoInternal(const char* iface) {
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);  // זהירות: להבטיח null-termination
+    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
     ifr.ifr_name[IFNAMSIZ - 1] = '\0';
 
     // Check if interface exists via SIOCGIFADDR
