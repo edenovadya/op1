@@ -74,12 +74,11 @@ void symbols_cleanup(const std::string &s,string* output) {
 
     if(s.find('>') != std::string::npos){
         output[0] = s.substr(0,pos_redirection);
-        output[1] = s.substr(pos_redirection2 ==
-        pos_redirection + 1?pos_redirection + 2:pos_redirection + 1);
+        output[1] = s.substr(pos_redirection);
     }
     if(s.find('|') != std::string::npos){
         output[0] = s.substr(0,pos_pipe);
-        output[1] = s.substr(pos_pipe_end == pos_pipe + 1?pos_pipe + 2:pos_pipe + 1);
+        output[1] = s.substr(pos_pipe);
     }
     return;
 }
@@ -162,7 +161,9 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
     symbols_cleanup(firstWord,firstWord_cleanup);
     firstWord = firstWord_cleanup[0];
 
-    string restOfLine = firstWord_cleanup[1];
+    string restOfFirst = firstWord_cleanup[1];
+
+    string restOfLine;
     getline(iss, restOfLine);
     restOfLine = _trim(restOfLine);
 
@@ -174,7 +175,7 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
         firstWord = get_alias(firstWord);
     }
 
-    string newCommandLine = firstWord + " " + restOfLine;
+    string newCommandLine = firstWord + restOfFirst + " " + restOfLine;
     return newCommandLine;
 }
 
@@ -330,7 +331,8 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 
     if(is_valid_redirection){
         string* command = new string(_trim(cmd_s.substr(0,first_gt)));
-        return new RedirectionCommand(cmd_line,CommandByFirstWord(command->c_str()));
+        return new RedirectionCommand(cmd_s.c_str(),CommandByFirstWord
+        (command->c_str()));
     }else if(contains(cmd_s,"|")){
         int pos = cmd_s.find("|");
         bool isCerr = contains(cmd_s,"|&");
@@ -520,6 +522,7 @@ ForegroundCommand::ForegroundCommand(const char *cmd_line, JobsList *jobs)
         : BuiltInCommand(cmd_line),jobs(jobs) {}
 
 void ForegroundCommand::execute() {
+    jobs->removeFinishedJobs();
     string line = string(cmd_line);
     _removeBackgroundSignForString(line);
     char* args[20];
