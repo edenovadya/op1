@@ -18,9 +18,6 @@ public:
     virtual void execute() = 0;
 
     const char* getCmdLine() const;
-    //virtual void prepare();
-    //virtual void cleanup();
-    // TODO: Add your extra methods if needed
 };
 
 class BuiltInCommand : public Command {
@@ -81,7 +78,6 @@ public:
 };
 
 class NetInfo : public Command {
-    // TODO: Add your data members **BONUS: 10 Points**
 public:
     NetInfo(const char *cmd_line);
 
