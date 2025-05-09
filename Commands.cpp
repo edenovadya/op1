@@ -161,7 +161,9 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
     symbols_cleanup(firstWord,firstWord_cleanup);
     firstWord = firstWord_cleanup[0];
 
-    string restOfLine = firstWord_cleanup[1];
+    string restOfFirst = firstWord_cleanup[1];
+
+    string restOfLine;
     getline(iss, restOfLine);
     restOfLine = _trim(restOfLine);
 
@@ -173,7 +175,7 @@ std::string SmallShell::alias_preparse_Cmd(const char *cmd_line) const{
         firstWord = get_alias(firstWord);
     }
 
-    string newCommandLine = firstWord + " " + restOfLine;
+    string newCommandLine = firstWord + restOfFirst + " " + restOfLine;
     return newCommandLine;
 }
 
