@@ -1,5 +1,4 @@
 #include "Commands.h"
-
 #include <cmath>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -21,10 +20,9 @@
 #include <iomanip>
 #include <pwd.h>
 #include <sys/syscall.h>
-#include <stdint.h>
+#include <cstdint>
 extern char **environ;
 
-#include <cstdint>
 
 struct linux_dirent64 {
     uint64_t        d_ino;

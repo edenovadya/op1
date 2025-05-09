@@ -96,7 +96,6 @@ public:
 class ChangeDirCommand : public BuiltInCommand {
     public:
     std::string* plastPwd;
-    // TODO: Add your data members public:
     ~ChangeDirCommand() override = default;
     ChangeDirCommand(const char *cmd_line, std::string* plastPwd);
     void execute() override;
@@ -127,7 +126,6 @@ class QuitCommand : public BuiltInCommand {
 };
 
 class Chprompt : public BuiltInCommand {
-    // TODO: Add your data members
 public:
     Chprompt(const char *cmd_line);
     virtual ~Chprompt() = default;
@@ -188,7 +186,6 @@ public:
 };
 
 class JobsCommand : public BuiltInCommand {
-    // TODO: Add your data members
     JobsList* jobs;
 
 public:
@@ -253,7 +250,6 @@ public:
 
 class SmallShell {
 private:
-    // TODO: Add your data members
     SmallShell();
     std::string current_dir;
     std::string last_dir;
